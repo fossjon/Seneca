@@ -1,0 +1,1303 @@
+#!/usr/bin/python
+
+versnumb = "2"
+infotext = '''
+Date: 2012/03/17
+Version: 0.5.2-''' + versnumb + '''
+Author: Jon Chiappetta
+'''
+
+import bz2
+import gzip
+import os
+import random
+import re
+import signal
+import subprocess
+import sys
+import time
+import tempfile
+import traceback
+
+try:
+	import urllib.request
+except:
+	import urllib
+
+from PyQt4 import QtGui
+from PyQt4 import QtCore
+
+class linux:
+	def byttostr(self, byteinpt):
+		outpstri = ""
+		for inptitem in byteinpt:
+			try:
+				inptitem = ord(inptitem)
+			except:
+				pass
+			try:
+				outpstri += chr(inptitem)
+			except:
+				outpstri += "?"
+		return outpstri
+	
+	def fixspath(self, filepath):
+		return filepath
+	
+	def execcomd(self, comdlist, pipelist=[], errredir=False):
+		sys.stderr.write("execute:" + str(comdlist) + "|" + str(pipelist) + "\n"); sys.stderr.flush()
+		
+		if (not errredir):
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE)
+		else:
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		
+		return [returnpi]
+	
+	def finddata(self, pathlist, filename, subsfold="data/"):
+		for pathfold in pathlist:
+			if (os.path.exists(pathfold + "/" + subsfold + filename)):
+				return (pathfold + "/" + subsfold + filename)
+		return ""
+	
+	def callself(self, progcomd, argslist):
+		proglist = ["/usr/bin/python"]
+		
+		if (progcomd[0:1] != "/"):
+			progcomd = (os.getcwd() + "/" + progcomd)
+		
+		proglist.append(progcomd)
+		
+		for argsitem in argslist:
+			proglist.append(argsitem)
+		
+		return proglist
+	
+	def listdevs(self, pathlist):
+		outplist = []
+		execlist = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"]
+		diskcomd = self.finddata(execlist, "fdisk", subsfold="")
+		pipeobjc = self.execcomd([diskcomd, "-l"], errredir=True)
+		bytelist = ["B", "K", "M", "G", "T", "P", "E"]
+		
+		while (1):
+			try:
+				tempread = pipeobjc[0].stdout.readline()
+			except:
+				break
+			
+			if (not tempread):
+				break
+			
+			tempread = self.byttostr(tempread)
+			tempread = tempread.strip()
+			
+			tempread = re.sub("[ \t][ \t]+", " ", tempread)
+			
+			regxobjc = re.match("^Disk ([^ ]+): ([^ ]+) (.).*$", tempread)
+			mappobjc = re.match("^.*/mapper/.*$", tempread)
+			
+			if (regxobjc and (not mappobjc)):
+				devsname = regxobjc.group(1)
+				devssize = regxobjc.group(2)
+				devsmagn = regxobjc.group(3)
+				
+				devssize = int(float(devssize))
+				magnindx = bytelist.index(devsmagn)
+				
+				while (devssize > 999):
+					devssize = (devssize / 1000)
+					magnindx = (magnindx + 1)
+				
+				if ((0 < devssize) and (devssize < 33) and (magnindx == 3)):
+					devslabl = ("%s (%d%s)" % (devsname, devssize, bytelist[magnindx]))
+					outplist.append([devsname, devslabl])
+		
+		try:
+			pipeobjc[0].stdout.close()
+		except:
+			pass
+		
+		return outplist
+
+class windows:
+	def byttostr(self, byteinpt):
+		outpstri = ""
+		for inptitem in byteinpt:
+			try:
+				inptitem = ord(inptitem)
+			except:
+				pass
+			try:
+				outpstri += chr(inptitem)
+			except:
+				outpstri += "?"
+		return outpstri
+	
+	def fixspath(self, filepath):
+		return filepath.replace("/", "\\")
+	
+	def execcomd(self, comdlist, pipelist=[], errredir=False):
+		sys.stderr.write("execute:" + str(comdlist) + "|" + str(pipelist) + "\n"); sys.stderr.flush()
+		
+		if (not errredir):
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+		else:
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+		lastpipe = returnpi
+		
+		for pipeitem in pipelist:
+			if (not errredir):
+				temppipe = subprocess.Popen(pipeitem, stdin=lastpipe.stdout, stdout=subprocess.PIPE, shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+			else:
+				temppipe = subprocess.Popen(pipeitem, stdin=lastpipe.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+			lastpipe.stdout.close()
+			lastpipe = temppipe
+		
+		return [returnpi, lastpipe]
+	
+	def finddata(self, pathlist, filename, subsfold="data\\"):
+		for pathfold in pathlist:
+			if (os.path.exists(pathfold + "\\" + subsfold + filename)):
+				return (pathfold + "\\" + subsfold + filename)
+		return ""
+	
+	def callself(self, progcomd, argslist):
+		proglist = []
+		
+		if (progcomd[1:3] != ":\\"):
+			progcomd = (os.getcwd() + "\\" + progcomd)
+		
+		if (re.match("^.*\.exe$", progcomd)):
+			proglist.append(progcomd)
+		
+		else:
+			progpref = "C:\\"
+			rootlist = os.listdir(progpref)
+			
+			rootlist.sort()
+			rootlist.reverse()
+			
+			for fileitem in rootlist:
+				progpath = (progpref + fileitem + "\\python.exe")
+				
+				if (os.path.exists(progpath)):
+					proglist.append(progpath)
+					proglist.append(progcomd)
+					break
+		
+		if (len(proglist) > 0):
+			for argsitem in argslist:
+				proglist.append(argsitem)
+		
+		return proglist
+	
+	def mapsdevs(self, pathlist):
+		disktype = "v"
+		lastkeyv = ""
+		drivemap = {}
+		makecomd = self.finddata(pathlist, "dd.exe")
+		pipeobjc = self.execcomd([makecomd, "--list"], errredir=True)
+		
+		while (1):
+			try:
+				readline = pipeobjc[0].stdout.readline()
+			except:
+				break
+			
+			if (not readline):
+				break
+			
+			readline = self.byttostr(readline)
+			readline = readline.strip()
+			
+			readline = readline.replace("\\", "/")
+			readline = re.sub("Partition[0-9]+$", "", readline)
+			readline = re.sub("[/]+$", "", readline)
+			
+			regxobjc = re.match("^.*NT Block Device.*$", readline)
+			
+			if (regxobjc):
+				disktype = "b"
+			
+			regxobjc = re.match("^//.*/([^/]+)$", readline)
+			
+			if (regxobjc):
+				lastkeyv = regxobjc.group(1)
+				drivemap[lastkeyv] = {"type":disktype, "link":[], "symb":[]}
+			
+			regxobjc = re.match("^link to (.*)$", readline)
+			
+			if (regxobjc):
+				drivemap[lastkeyv]["link"].append(regxobjc.group(1))
+			
+			regxobjc = re.match("^Mounted on [/.]*(.*)$", readline)
+			
+			if (regxobjc):
+				drivemap[lastkeyv]["symb"].append(regxobjc.group(1).upper())
+		
+		for blockkey in drivemap.keys():
+			if (drivemap[blockkey]["type"] != "b"):
+				continue
+			
+			for drivekey in drivemap.keys():
+				if (drivemap[drivekey]["type"] != "v"):
+					continue
+				
+				for linkkeyv in drivemap[blockkey]["link"]:
+					if (not linkkeyv in drivemap[drivekey]["link"]):
+						continue
+					
+					for symbitem in drivemap[drivekey]["symb"]:
+						if (symbitem in drivemap[blockkey]["symb"]):
+							continue
+						
+						drivemap[blockkey]["symb"].append(symbitem)
+		
+		try:
+			pipeobjc[0].stdout.close()
+		except:
+			pass
+		
+		return drivemap
+	
+	def listdevs(self, pathlist):
+		outplist = []
+		bytelist = ["B", "K", "M", "G", "T", "P", "E"]
+		devsmaps = self.mapsdevs(pathlist)
+		pipeobjc = self.execcomd(["echo", "list", "disk"], pipelist=[["diskpart.exe"]], errredir=True)
+		
+		while (1):
+			try:
+				tempread = pipeobjc[1].stdout.readline()
+			except:
+				break
+			
+			if (not tempread):
+				break
+			
+			tempread = self.byttostr(tempread)
+			tempread = tempread.strip()
+			
+			tempread = re.sub("[ \t][ \t]+", " ", tempread)
+			regxobjc = re.match("^Disk ([0-9]+)[^0-9]+([0-9]+) (.).*$", tempread)
+			
+			if (regxobjc):
+				devsname = regxobjc.group(1)
+				devssize = regxobjc.group(2)
+				devsmagn = regxobjc.group(3)
+				
+				devsname = ("Harddisk" + devsname)
+				devssize = int(float(devssize))
+				magnindx = bytelist.index(devsmagn)
+				
+				for x in range(0, 2):
+					while (devssize > 999):
+						devssize = (devssize / 1000)
+						magnindx = (magnindx + 1)
+					if (x == 0):
+						devssize = (devssize + 1)
+				
+				devssymb = ""
+				
+				if (devsname in devsmaps.keys()):
+					devssymb = ("(" + ", ".join(devsmaps[devsname]["symb"]) + ")")
+				
+				if ((0 < devssize) and (devssize < 33) and (magnindx == 3)):
+					devslabl = ("%s (%d%s) %s" % (devsname, devssize, bytelist[magnindx], devssymb))
+					outplist.append([devsname, devslabl])
+		
+		try:
+			pipeobjc[1].stdout.close()
+		except:
+			pass
+		
+		return outplist
+
+sharedobj = {
+"initstat":0, "pathlist":[], "pipeobjc":{}, "tempfile":{}, "systemt":None,
+"remourln":"http://scotland.proximity.on.ca/fedora-arm/releases", "remolist":"list.php", "remoinfo":"info.php", "removers":"v="+versnumb,
+"app":QtGui.QApplication(sys.argv), "windowobj":QtGui.QWidget(), "timerobj":QtCore.QTimer(),
+"row1cbox":None, "row1layo":None, "headimag":None, "headtext":None, "infobutt":None,
+"row2cbox":None, "row2layo":None, "localbtn":None, "rowbtora":None, "downmenu":None, "downrefr":None, "localimg":"", "downlist":[],
+"row3cbox":None, "row3layo":None, "destmenu":None, "destrefr":None, "destlist":[],
+"row4cbox":None, "row4layo":None, "finbuttn":None, "progress":None, "progtext":None, "cancelbtn":None,
+"fakefake":None
+}
+
+def floatdiv(a, b):
+	if (b < 1):
+		return 0
+	else:
+		return float(float((a * 100) / b) / 100)
+
+def bytecalc(datasize):
+	byteindx = 0
+	bytelist = [["B",10**0], ["K",10**3], ["M",10**6], ["G",10**9], ["T",10**12], ["P",10**15], ["E",10**18]]
+	
+	while (datasize > 999):
+		datasize = (datasize / 1000)
+		byteindx = (byteindx + 1)
+	
+	return bytelist[byteindx]
+
+def outpfile(filename, filedata, postfixs="\n"):
+	fileobjc = open(filename, "w")
+	fileobjc.write(filedata + postfixs)
+	fileobjc.close()
+
+def readfile(filename):
+	filedata = ""
+	
+	while (filedata.find("\n") < 0):
+		try:
+			fileobjc = open(filename, "r")
+			filedata = fileobjc.read()
+			fileobjc.close()
+		except:
+			return ""
+	
+	return filedata.strip()
+
+def homefold():
+	username = os.getlogin()
+	pathlist = ["/home/" + username + "/Downloads/", "C:\\Documents and Settings\\" + username + "\\Downloads\\", "C:\\Users\\" + username + "\\Downloads\\"]
+	
+	for pathitem in pathlist:
+		if (os.path.exists(pathitem)):
+			return pathitem
+	
+	return None
+
+def xferfile(sorcobjc, sorcsize, destobjc, slogpref, slogfile, syncoptn, sendfins):
+	readnumb = 0
+	lasttime = 0
+	
+	ratenumb = 0
+	ratetime = 1.5
+	
+	sizemagn = bytecalc(sorcsize)
+	sizenumb = floatdiv(sorcsize, sizemagn[1])
+	
+	speedmag = bytecalc(0)
+	speednum = 0
+	
+	while (1):
+		try:
+			tempread = sorcobjc.read(2**16)
+		except:
+			break
+		
+		tempsize = len(tempread)
+		readnumb += tempsize
+		
+		if (not tempread):
+			break
+		
+		destobjc.write(tempread)
+		
+		if (syncoptn):
+			destobjc.flush()
+			os.fsync(destobjc.fileno())
+		
+		prestime = time.time()
+		
+		if ((prestime - lasttime) >= ratetime):
+			if (sorcsize < 1):
+				percents = 0
+			else:
+				percents = int((readnumb * 100) / sorcsize)
+			
+			donemagn = bytecalc(readnumb)
+			donenumb = floatdiv(readnumb, donemagn[1])
+			
+			speedtmp = int((readnumb - ratenumb) / (prestime - lasttime))
+			speedmag = bytecalc(speedtmp)
+			speednum = floatdiv(speedtmp, speedmag[1])
+			
+			outpfile(slogfile, "s\1%d\2%s:[%.2f%s / %.2f%s @ %.2f %s/s]" % (percents, slogpref, donenumb, donemagn[0], sizenumb, sizemagn[0], speednum, speedmag[0]))
+			
+			ratenumb = readnumb
+			lasttime = prestime
+	
+	if (sorcsize < 1):
+		percents = 100
+	else:
+		percents = int((readnumb * 100) / sorcsize)
+	
+	donemagn = bytecalc(readnumb)
+	donenumb = floatdiv(readnumb, donemagn[1])
+	
+	if (sendfins):
+		outpfile(slogfile, "f\1%d\2%s:[%.2f%s / %.2f%s @ %.2f %s/s]" % (percents, slogpref, donenumb, donemagn[0], sizenumb, sizemagn[0], speednum, speedmag[0]))
+
+def xferwins(execlist, sendlist, sorcsize, slogpref, slogfile):
+	global sharedobj
+	
+	pipeobjc = sharedobj["systemt"].execcomd(execlist, pipelist=sendlist, errredir=True)
+	lasttime = 0
+	
+	ratenumb = 0
+	ratetime = 1.5
+	
+	sizemagn = bytecalc(sorcsize)
+	sizenumb = floatdiv(sorcsize, sizemagn[1])
+	
+	speedmag = bytecalc(0)
+	speednum = 0
+	
+	while (1):
+		try:
+			dataread = pipeobjc[1].stdout.readline()
+		except:
+			break
+		
+		dataread = sharedobj["systemt"].byttostr(dataread)
+		readnumb = dataread.strip()
+		prestime = time.time()
+		
+		if (re.match("^[0-9,]+$", readnumb)):
+			readnumb = int(readnumb.replace(",", ""))
+			percents = int((readnumb * 100) / sorcsize)
+			
+			donemagn = bytecalc(readnumb)
+			donenumb = floatdiv(readnumb, donemagn[1])
+			
+			speedtmp = int((readnumb - ratenumb) / (prestime - lasttime))
+			speedmag = bytecalc(speedtmp)
+			speednum = floatdiv(speedtmp, speedmag[1])
+			
+			outpfile(slogfile, "s\1%d\2%s:[%.2f%s / %.2f%s @ %.2f %s/s]" % (percents, slogpref, donenumb, donemagn[0], sizenumb, sizemagn[0], speednum, speedmag[0]))
+			
+			ratenumb = readnumb
+			lasttime = prestime
+		
+		if (not dataread):
+			break
+	
+	try:
+		pipeobjc[1].stdout.close()
+	except:
+		pass
+	
+	percents = 100
+	donemagn = bytecalc(sorcsize)
+	donenumb = floatdiv(sorcsize, donemagn[1])
+	
+	outpfile(slogfile, "s\1%d\2%s:[%.2f%s / %.2f%s @ %.2f %s/s]" % (percents, slogpref, donenumb, donemagn[0], sizenumb, sizemagn[0], speednum, speedmag[0]))
+
+def preppipe(progmode):
+	global sharedobj
+	
+	if (not progmode in sharedobj["pipeobjc"].keys()):
+		sharedobj["pipeobjc"][progmode] = []
+	
+	return len(sharedobj["pipeobjc"][progmode])
+
+def preptemp(progmode):
+	global sharedobj
+	
+	if (not progmode in sharedobj["tempfile"].keys()):
+		templogf = tempfile.mkstemp(prefix=("faii." + progmode + ".log."))
+		tempbinf = tempfile.mkstemp(prefix=("faii." + progmode + ".bin."))
+		sharedobj["tempfile"][progmode] = [templogf[1], tempbinf[1]]
+	
+	outpfile(sharedobj["tempfile"][progmode][0], "", postfixs="\n")
+	outpfile(sharedobj["tempfile"][progmode][1], "", postfixs="")
+
+def cleanups(pipekeyn="*"):
+	global sharedobj
+	
+	for pipeitem in sharedobj["pipeobjc"].keys():
+		if ((pipeitem != pipekeyn) and (pipekeyn != "*")):
+			continue
+		
+		for pipeobjc in sharedobj["pipeobjc"][pipeitem]:
+			try:
+				pipeobjc.stdout.close()
+			except:
+				pass
+			
+			try:
+				pipeobjc.send_signal(signal.CTRL_C_EVENT)
+			except:
+				pass
+			
+			try:
+				pipeobjc.send_signal(signal.CTRL_BREAK_EVENT)
+			except:
+				pass
+			
+			try:
+				pipeobjc.send_signal(signal.SIGTERM)
+			except:
+				pass
+			
+			try:
+				pipeobjc.terminate()
+			except:
+				pass
+			
+			try:
+				pipeobjc.kill()
+			except:
+				pass
+		
+		try:
+			os.unlink(sharedobj["tempfile"][pipeitem][0])
+		except:
+			pass
+		
+		try:
+			os.unlink(sharedobj["tempfile"][pipeitem][1])
+		except:
+			pass
+		
+		sharedobj["pipeobjc"][pipeitem] = []
+
+def fsetsize(windobjc, widenumb):
+	windobjc.setMinimumSize(1, 1)
+	windobjc.setMaximumSize(9999, 9999)
+	
+	windobjc.adjustSize()
+	windobjc.updateGeometry()
+	geomobjc = windobjc.geometry()
+	
+	windobjc.setMinimumSize(geomobjc.width() + widenumb, geomobjc.height())
+	windobjc.setMaximumSize(geomobjc.width() + widenumb, geomobjc.height())
+	
+	windobjc.updateGeometry()
+
+def refrwins():
+	global sharedobj
+	
+	fsetsize(sharedobj["localbtn"], 50)
+	fsetsize(sharedobj["downmenu"], 50)
+	fsetsize(sharedobj["destmenu"], 50)
+	
+	rowsmaxw = 0
+	
+	for x in range(1, 5):
+		rowsobjc = sharedobj["row" + str(x) + "cbox"]
+		fsetsize(rowsobjc, 0)
+		rowsmaxw = max(rowsmaxw, rowsobjc.geometry().width())
+	
+	for x in range(1, 5):
+		rowsobjc = sharedobj["row" + str(x) + "cbox"]
+		rowsobjc.setMinimumSize(rowsmaxw, rowsobjc.geometry().height())
+		rowsobjc.setMaximumSize(rowsmaxw, rowsobjc.geometry().height())
+	
+	lastrowo = sharedobj["row4cbox"].geometry()
+	sharedobj["windowobj"].setMinimumSize(rowsmaxw + 20, lastrowo.y() + lastrowo.height() + 10)
+	sharedobj["windowobj"].setMaximumSize(rowsmaxw + 20, lastrowo.y() + lastrowo.height() + 10)
+
+def bcontrol(msetting):
+	global sharedobj
+	
+	sharedobj["infobutt"].setDisabled(not msetting)
+	sharedobj["localbtn"].setDisabled(not msetting)
+	sharedobj["downmenu"].setDisabled(not msetting)
+	sharedobj["downrefr"].setDisabled(not msetting)
+	sharedobj["destmenu"].setDisabled(not msetting)
+	sharedobj["destrefr"].setDisabled(not msetting)
+	sharedobj["finbuttn"].setDisabled(not msetting)
+	
+	sharedobj["cancelbtn"].setDisabled(msetting)
+
+def cancelit():
+	global sharedobj
+	
+	cleanups()
+	
+	sharedobj["progress"].setValue(0)
+	sharedobj["progtext"].setText("")
+	
+	bcontrol(True)
+
+def createpreb():
+	global sharedobj
+	
+	if (not sharedobj["localimg"]):
+		QtGui.QMessageBox.critical(sharedobj["windowobj"], "Critical!", "No source file was found!")
+		cancelit()
+		return -1
+	
+	devsindx = sharedobj["destmenu"].currentIndex()
+	devsname = sharedobj["destlist"][devsindx][0]
+	
+	replytxt = ("Warning: All data will be destroyed on device [%s] with the file contents of [%s]!\n\nAre you sure you want to continue?" % (devsname, sharedobj["localimg"]))
+	replyobj = QtGui.QMessageBox.question(sharedobj["windowobj"], "Warning!", replytxt, QtGui.QMessageBox.Yes | QtGui.QMessageBox.No, QtGui.QMessageBox.No)
+	
+	if (replyobj != QtGui.QMessageBox.Yes):
+		cancelit()
+		return -1
+	
+	comdmode = "i"
+	pipestat = preppipe(comdmode)
+	
+	if (pipestat < 1):
+		preptemp(comdmode)
+		filelist = sharedobj["tempfile"][comdmode]
+		execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], sharedobj["localimg"], devsname])
+		sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+
+def createprea():
+	global sharedobj
+	
+	bcontrol(False)
+	
+	downindx = sharedobj["downmenu"].currentIndex()
+	
+	if ((not sharedobj["localimg"]) and (downindx < 1)):
+		QtGui.QMessageBox.critical(sharedobj["windowobj"], "Critical!", "No source file or download was chosen!")
+		cancelit()
+		return -1
+	
+	devsindx = sharedobj["destmenu"].currentIndex()
+	devsleng = len(sharedobj["destlist"])
+	
+	if ((devsindx <= 0) or (devsleng <= devsindx)):
+		QtGui.QMessageBox.critical(sharedobj["windowobj"], "Critical!", "No destination device selected!")
+		cancelit()
+		return -1
+	
+	if (downindx > 0):
+		comdmode = "r"
+		pipestat = preppipe(comdmode)
+		
+		if (pipestat < 1):
+			random.shuffle(sharedobj["downlist"][downindx][1])
+			downitem = sharedobj["downlist"][downindx][1][0]
+			print("download:",downitem)
+			
+			preptemp(comdmode)
+			filelist = sharedobj["tempfile"][comdmode]
+			execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], downitem])
+			sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+		
+		return 0
+	
+	createpreb()
+
+def copyfile(srcfname, dstfname):
+	global sharedobj
+	
+	comdmode = "c"
+	pipestat = preppipe(comdmode)
+	
+	if (pipestat < 1):
+		preptemp(comdmode)
+		filelist = sharedobj["tempfile"][comdmode]
+		execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], srcfname, dstfname])
+		sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+
+def refrdown():
+	global sharedobj
+	
+	comdmode = "s"
+	pipestat = preppipe(comdmode)
+	
+	if (pipestat < 1):
+		sharedobj["downrefr"].setDisabled(True)
+		
+		preptemp(comdmode)
+		filelist = sharedobj["tempfile"][comdmode]
+		execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1]])
+		sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+
+def refrdest():
+	global sharedobj
+	
+	comdmode = "d"
+	pipestat = preppipe(comdmode)
+	
+	if (pipestat < 1):
+		sharedobj["destrefr"].setDisabled(True)
+		
+		preptemp(comdmode)
+		filelist = sharedobj["tempfile"][comdmode]
+		execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1]])
+		sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+
+def choosource():
+	global sharedobj
+	
+	filepath = str(QtGui.QFileDialog.getOpenFileName(sharedobj["windowobj"], caption="Select Image File"))
+	
+	if (filepath):
+		filepath = sharedobj["systemt"].fixspath(filepath)
+		
+		sharedobj["localimg"] = filepath
+		filename = os.path.basename(filepath)
+		sharedobj["localbtn"].setText(filename)
+	
+	sharedobj["downmenu"].setCurrentIndex(0)
+	
+	refrwins()
+
+def showinfo(inptstri=""):
+	global infotext
+	global sharedobj
+	
+	if (inptstri):
+		QtGui.QMessageBox.information(sharedobj["windowobj"], "Notice", inptstri)
+	else:
+		QtGui.QMessageBox.information(sharedobj["windowobj"], "Notice", infotext)
+
+def timercall():
+	global sharedobj
+	
+	if (sharedobj["initstat"] == 0):
+		try:
+			try:
+				urlnobjc = urllib.request.urlopen(sharedobj["remourln"] + "/" + sharedobj["remoinfo"] + "?" + sharedobj["removers"])
+			except:
+				urlnobjc = urllib.urlopen(sharedobj["remourln"] + "/" + sharedobj["remoinfo"] + "?" + sharedobj["removers"])
+		except:
+			urlnobjc = None
+		
+		try:
+			infostri = urlnobjc.read()
+		except:
+			infostri = ""
+		
+		infostri = sharedobj["systemt"].byttostr(infostri)
+		infostri = infostri.strip()
+		
+		if (infostri):
+			showinfo(infostri)
+		
+		sharedobj["initstat"] = 1
+	
+	for pipeitem in sharedobj["pipeobjc"]:
+		if (len(sharedobj["pipeobjc"][pipeitem]) > 0):
+			filepath = sharedobj["tempfile"][pipeitem][0]
+			filedata = readfile(filepath)
+			filelist = filedata.split("\1")
+			
+			''' beg: list devices '''
+			
+			if (pipeitem == "d"):
+				for x in range(1, len(filelist)):
+					devslist = filelist[x].split("\2")
+					
+					if (len(devslist) != 2):
+						continue
+					
+					if (not devslist in sharedobj["destlist"]):
+						sharedobj["destlist"].append(devslist)
+						sharedobj["destmenu"].addItem(devslist[1])
+						refrwins()
+				
+				if (filelist[0] == "f"):
+					sharedobj["destrefr"].setDisabled(False)
+			
+			''' end: list devices '''
+			
+			''' beg: list downloads '''
+			
+			if (pipeitem == "s"):
+				for x in range(1, len(filelist)):
+					recvlist = filelist[x].split("\2"); downlist = []
+					lastname = ""; lastlist = []
+					
+					for recvitem in recvlist:
+						if (len(recvitem) > 2):
+							if (recvitem[0] == "="):
+								if (lastname and (len(lastlist) > 0)):
+									downlist.append([lastname, lastlist])
+									lastname = ""; lastlist = []
+								lastname = recvitem[1:].strip()
+							elif (recvitem[0] == "*"):
+								lastlist.append(recvitem[1:].strip())
+					
+					if (lastname and (len(lastlist) > 0)):
+						downlist.append([lastname, lastlist])
+					
+					for recvitem in downlist:
+						itemflag = 0
+						for downitem in sharedobj["downlist"]:
+							if (downitem[0] == recvitem[0]):
+								itemflag = 1
+						if (itemflag == 0):
+							sharedobj["downlist"].append(recvitem)
+							sharedobj["downmenu"].addItem(recvitem[0])
+							refrwins()
+				
+				if (filelist[0] == "f"):
+					sharedobj["downrefr"].setDisabled(False)
+			
+			''' end: list downloads '''
+			
+			''' beg: download, save, install file '''
+			
+			if ((pipeitem == "r") or (pipeitem == "c") or (pipeitem == "i")):
+				prognumb = 0
+				
+				for x in range(1, len(filelist)):
+					proglist = filelist[x].split("\2")
+					
+					if (len(proglist) == 2):
+						prognumb = int(proglist[0])
+						sharedobj["progress"].setValue(prognumb)
+						sharedobj["progtext"].setText(proglist[1])
+						refrwins()
+				
+				if ((pipeitem == "r") and (filelist[0] == "f")):
+					if (prognumb == 100):
+						savefold = homefold()
+						binsfile = sharedobj["tempfile"][pipeitem][1]
+						if (savefold):
+							try:
+								downindx = sharedobj["downmenu"].currentIndex()
+								downname = os.path.basename(sharedobj["downlist"][downindx][1][0])
+								copyfile(binsfile, savefold + downname)
+								binsfile = (savefold + downname)
+							except:
+								pass
+						sharedobj["localimg"] = binsfile
+						if (binsfile == sharedobj["tempfile"][pipeitem][1]):
+							createpreb()
+					else:
+						QtGui.QMessageBox.warning(sharedobj["windowobj"], "Warning!", "Error during file download! Try the install again.")
+						cancelit()
+				
+				if ((pipeitem == "c") and (filelist[0] == "f")):
+					if (prognumb == 100):
+						createpreb()
+					else:
+						QtGui.QMessageBox.warning(sharedobj["windowobj"], "Warning!", "Error while saving file! Try the install again.")
+						cancelit()
+				
+				if ((pipeitem == "i") and (filelist[0] == "f")):
+					if (prognumb == 100):
+						sharedobj["progtext"].setText("Install Complete!")
+						bcontrol(True)
+					else:
+						QtGui.QMessageBox.warning(sharedobj["windowobj"], "Warning!", "Error during file install! Try the install again.")
+						cancelit()
+			
+			''' end: download, save, install file '''
+			
+			if (filelist[0] == "f"):
+				cleanups(pipekeyn=pipeitem)
+
+def main():
+	global sharedobj
+	
+	''' beg: row 1 '''
+	
+	rowlwide = 10; rowlhigh = 0
+	
+	sharedobj["row1cbox"] = QtGui.QWidget(sharedobj["windowobj"])
+	sharedobj["row1cbox"].move(rowlwide, rowlhigh)
+	
+	sharedobj["row1layo"] = QtGui.QHBoxLayout(sharedobj["row1cbox"])
+	
+	sharedobj["row1layo"].addStretch(1)
+	
+	imagfile = sharedobj["systemt"].finddata(sharedobj["pathlist"], "logo.png")
+	imagobjc = QtGui.QPixmap(imagfile)
+	#imagobjc = imagobjc.scaledToWidth(128)
+	sharedobj["headimag"] = QtGui.QLabel("")
+	sharedobj["headimag"].setPixmap(imagobjc)
+	fsetsize(sharedobj["headimag"], 0)
+	sharedobj["row1layo"].addWidget(sharedobj["headimag"])
+	
+	fontobjc = QtGui.QFont("SansSerif", 14)
+	fontobjc.setBold(True)
+	sharedobj["headtext"] = QtGui.QLabel("Installer")
+	sharedobj["headtext"].setFont(fontobjc)
+	fsetsize(sharedobj["headtext"], 0)
+	sharedobj["row1layo"].addWidget(sharedobj["headtext"])
+	
+	sharedobj["row1layo"].addStretch(1)
+	
+	imagfile = sharedobj["systemt"].finddata(sharedobj["pathlist"], "question.png")
+	sharedobj["infobutt"] = QtGui.QPushButton(QtGui.QIcon(imagfile), "")
+	sharedobj["infobutt"].clicked.connect(showinfo)
+	sharedobj["infobutt"].setIconSize(QtCore.QSize(16, 16))
+	fsetsize(sharedobj["infobutt"], 0)
+	sharedobj["row1layo"].addWidget(sharedobj["infobutt"])
+	
+	fsetsize(sharedobj["row1cbox"], 0)
+	
+	''' end: row 1 '''
+	
+	''' beg: row 2 '''
+	
+	rowlwide = 10; rowlhigh = (sharedobj["row1cbox"].geometry().y() + sharedobj["row1cbox"].geometry().height())
+	
+	sharedobj["row2cbox"] = QtGui.QGroupBox(sharedobj["windowobj"])
+	sharedobj["row2cbox"].setTitle("Source")
+	sharedobj["row2cbox"].move(rowlwide, rowlhigh)
+	
+	sharedobj["row2layo"] = QtGui.QHBoxLayout(sharedobj["row2cbox"])
+	
+	sharedobj["localbtn"] = QtGui.QPushButton("Browse")
+	sharedobj["localbtn"].clicked.connect(choosource)
+	fsetsize(sharedobj["localbtn"], 50)
+	sharedobj["row2layo"].addWidget(sharedobj["localbtn"])
+	
+	fontobjc = QtGui.QFont("SansSerif", 10)
+	fontobjc.setBold(True)
+	sharedobj["rowbtora"] = QtGui.QLabel(" or ")
+	sharedobj["rowbtora"].setFont(fontobjc)
+	fsetsize(sharedobj["rowbtora"], 0)
+	sharedobj["row2layo"].addWidget(sharedobj["rowbtora"])
+	
+	sharedobj["downlist"].append(["disabled", "Download"])
+	sharedobj["downmenu"] = QtGui.QComboBox()
+	sharedobj["downmenu"].setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
+	for menuitem in sharedobj["downlist"]:
+		sharedobj["downmenu"].addItem(menuitem[1])
+	fsetsize(sharedobj["downmenu"], 50)
+	sharedobj["row2layo"].addWidget(sharedobj["downmenu"])
+	
+	imagfile = sharedobj["systemt"].finddata(sharedobj["pathlist"], "refresh.png")
+	sharedobj["downrefr"] = QtGui.QPushButton(QtGui.QIcon(imagfile), "")
+	sharedobj["downrefr"].clicked.connect(refrdown)
+	sharedobj["downrefr"].setIconSize(QtCore.QSize(16, 16))
+	fsetsize(sharedobj["downrefr"], 0)
+	sharedobj["row2layo"].addWidget(sharedobj["downrefr"])
+	
+	sharedobj["row2layo"].addStretch(1)
+	fsetsize(sharedobj["row2cbox"], 0)
+	
+	''' end: row 2 '''
+	
+	''' beg: row 3 '''
+	
+	rowlwide = 10; rowlhigh = (sharedobj["row2cbox"].geometry().y() + sharedobj["row2cbox"].geometry().height() + 10)
+	
+	sharedobj["row3cbox"] = QtGui.QGroupBox(sharedobj["windowobj"])
+	sharedobj["row3cbox"].setTitle("Destination")
+	sharedobj["row3cbox"].move(rowlwide, rowlhigh)
+	
+	sharedobj["row3layo"] = QtGui.QHBoxLayout(sharedobj["row3cbox"])
+	
+	sharedobj["destlist"].append(["disabled", "Device"])
+	sharedobj["destmenu"] = QtGui.QComboBox()
+	sharedobj["destmenu"].setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
+	for menuitem in sharedobj["destlist"]:
+		sharedobj["destmenu"].addItem(menuitem[1])
+	fsetsize(sharedobj["destmenu"], 50)
+	sharedobj["row3layo"].addWidget(sharedobj["destmenu"])
+	
+	imagfile = sharedobj["systemt"].finddata(sharedobj["pathlist"], "refresh.png")
+	sharedobj["destrefr"] = QtGui.QPushButton(QtGui.QIcon(imagfile), "")
+	sharedobj["destrefr"].clicked.connect(refrdest)
+	sharedobj["destrefr"].setIconSize(QtCore.QSize(16, 16))
+	fsetsize(sharedobj["destrefr"], 0)
+	sharedobj["row3layo"].addWidget(sharedobj["destrefr"])
+	
+	sharedobj["row3layo"].addStretch(1)
+	fsetsize(sharedobj["row3cbox"], 0)
+	
+	''' end: row 3 '''
+	
+	''' beg: row 4 '''
+	
+	rowlwide = 10; rowlhigh = (sharedobj["row3cbox"].geometry().y() + sharedobj["row3cbox"].geometry().height() + 10)
+	
+	sharedobj["row4cbox"] = QtGui.QGroupBox(sharedobj["windowobj"])
+	sharedobj["row4cbox"].setTitle("Finish")
+	sharedobj["row4cbox"].move(rowlwide, rowlhigh)
+	
+	sharedobj["row4layo"] = QtGui.QHBoxLayout(sharedobj["row4cbox"])
+	
+	sharedobj["finbuttn"] = QtGui.QPushButton("Install")
+	sharedobj["finbuttn"].clicked.connect(createprea)
+	fsetsize(sharedobj["finbuttn"], 50)
+	sharedobj["row4layo"].addWidget(sharedobj["finbuttn"])
+	
+	sharedobj["progress"] = QtGui.QProgressBar()
+	sharedobj["progress"].setValue(0)
+	sharedobj["progress"].setMinimumSize(160, 20)
+	sharedobj["progress"].setMaximumSize(160, 20)
+	sharedobj["row4layo"].addWidget(sharedobj["progress"])
+	
+	fontobjc = QtGui.QFont("SansSerif", 10)
+	sharedobj["progtext"] = QtGui.QLabel("Ready")
+	sharedobj["progtext"].setFont(fontobjc)
+	sharedobj["progtext"].setMinimumSize(360, 20)
+	sharedobj["progtext"].setMaximumSize(360, 20)
+	sharedobj["row4layo"].addWidget(sharedobj["progtext"])
+	
+	sharedobj["row4layo"].addStretch(1)
+	fsetsize(sharedobj["row4cbox"], 0)
+	
+	imagfile = sharedobj["systemt"].finddata(sharedobj["pathlist"], "cancel.png")
+	sharedobj["cancelbtn"] = QtGui.QPushButton(QtGui.QIcon(imagfile), "")
+	sharedobj["cancelbtn"].clicked.connect(cancelit)
+	sharedobj["cancelbtn"].setIconSize(QtCore.QSize(16, 16))
+	fsetsize(sharedobj["cancelbtn"], 0)
+	sharedobj["row4layo"].addWidget(sharedobj["cancelbtn"])
+	
+	''' end: row 4 '''
+	
+	''' beg: post setup '''
+	
+	bcontrol(True)
+	
+	sharedobj["windowobj"].setWindowTitle("Fedora ARM Image Installer")
+	sharedobj["windowobj"].show()
+	
+	sharedobj["timerobj"].timeout.connect(timercall)
+	sharedobj["timerobj"].start(500)
+	
+	refrdest()
+	refrwins()
+	
+	''' end: post setup '''
+	
+	sharedobj["app"].exec_()
+
+''' beg: pre-variable setup '''
+
+if (os.name == "posix"):
+	sharedobj["systemt"] = linux()
+else:
+	sharedobj["systemt"] = windows()
+
+pdirname = os.path.dirname(sys.argv[0])
+
+if (not pdirname):
+	pdirname = "."
+
+sharedobj["pathlist"].append(pdirname)
+sharedobj["pathlist"].append("/usr/share/" + os.path.basename(sys.argv[0]))
+
+''' end: pre-variable setup '''
+
+if (__name__ == "__main__"):
+	if (len(sys.argv) == 1):
+		try:
+			main()
+		except:
+			(exc_type, exc_value, exc_traceback) = sys.exc_info()
+			traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stdout)
+		
+		cleanups()
+	
+	if ((len(sys.argv) > 1) and (sys.argv[1] == "line")):
+		while (1):
+			try:
+				d = sys.stdin.read(1024)
+			except:
+				break
+			if (not d):
+				break
+			d = sharedobj["systemt"].byttostr(d)
+			d = d.replace("\r", "\r\n")
+			sys.stdout.write(d)
+			sys.stdout.flush()
+	
+	if ((len(sys.argv) > 1) and (sys.argv[1] == "slow")):
+		l = 0
+		while (1):
+			try:
+				d = sys.stdin.readline()
+			except:
+				break
+			if (not d):
+				break
+			d = sharedobj["systemt"].byttostr(d)
+			d = d.strip()
+			if (not d):
+				continue
+			p = time.time()
+			if ((p - l) >= 1.5):
+				sys.stdout.write(d + "\n")
+				sys.stdout.flush()
+				l = p
+	
+	''' beg: list devices '''
+	
+	if ((len(sys.argv) > 2) and (sys.argv[1] == "d")):
+		devlstri = "f\1"
+		
+		for devsitem in sharedobj["systemt"].listdevs(sharedobj["pathlist"]):
+			devlstri += ("%s\2%s\1" % (devsitem[0], devsitem[1]))
+		
+		outpfile(sys.argv[2], devlstri)
+	
+	''' end: list devices '''
+	
+	''' beg: list downloads '''
+	
+	if ((len(sys.argv) > 2) and (sys.argv[1] == "s")):
+		downstri = "f\1"
+		
+		try:
+			try:
+				urlnobjc = urllib.request.urlopen(sharedobj["remourln"] + "/" + sharedobj["remolist"] + "?" + sharedobj["removers"])
+			except:
+				urlnobjc = urllib.urlopen(sharedobj["remourln"] + "/" + sharedobj["remolist"] + "?" + sharedobj["removers"])
+		except:
+			urlnobjc = None
+		
+		while (1):
+			try:
+				tempread = urlnobjc.readline()
+			except:
+				break
+			
+			if (not tempread):
+				break
+			
+			tempread = sharedobj["systemt"].byttostr(tempread)
+			tempread = tempread.strip()
+			
+			if (tempread):
+				downstri += (tempread + "\2")
+		
+		outpfile(sys.argv[2], downstri)
+	
+	''' end: list downloads '''
+	
+	''' beg: download file '''
+	
+	if ((len(sys.argv) > 4) and (sys.argv[1] == "r")):
+		try:
+			try:
+				urlnobjc = urllib.request.urlopen(sys.argv[4])
+			except:
+				urlnobjc = urllib.urlopen(sys.argv[4])
+		except:
+			urlnobjc = None
+		
+		try:
+			filesize = int(urlnobjc.headers.get("content-length"))
+			if (filesize < 1):
+				filesize = 1
+		except:
+			filesize = 1
+		
+		fileobjc = open(sys.argv[3], "wb")
+		
+		xferfile(urlnobjc, filesize, fileobjc, "Downloading", sys.argv[2], False, True)
+		
+		try:
+			fileobjc.close()
+		except:
+			pass
+	
+	''' end: download file '''
+	
+	''' beg: saving file '''
+	
+	if ((len(sys.argv) > 5) and (sys.argv[1] == "c")):
+		srcfobjc = open(sys.argv[4], "rb")
+		dstfobjc = open(sys.argv[5], "wb")
+		filesize = os.path.getsize(sys.argv[4])
+		
+		xferfile(srcfobjc, filesize, dstfobjc, "Saving", sys.argv[2], False, True)
+		
+		try:
+			dstfobjc.close()
+		except:
+			pass
+		
+		try:
+			srcfobjc.close()
+		except:
+			pass
+	
+	''' end: saving file '''
+	
+	''' beg: install file '''
+	
+	if ((len(sys.argv) > 5) and (sys.argv[1] == "i")):
+		srcfname = sys.argv[4]
+		srcfobjc = None
+		
+		if (not srcfobjc):
+			try:
+				srcfobjc = gzip.GzipFile(sys.argv[4], "rb")
+				srcfobjc.read(1)
+				srcfobjc.close()
+				srcfobjc = gzip.GzipFile(sys.argv[4], "rb")
+			except:
+				srcfobjc = None
+		
+		if (not srcfobjc):
+			try:
+				srcfobjc = bz2.BZ2File(sys.argv[4], "rb")
+				srcfobjc.read(1)
+				srcfobjc.close()
+				srcfobjc = bz2.BZ2File(sys.argv[4], "rb")
+			except:
+				srcfobjc = None
+		
+		if (srcfobjc):
+			srcfname = sys.argv[3]
+			dstfobjc = open(srcfname, "wb")
+			filesize = 0
+			
+			xferfile(srcfobjc, filesize, dstfobjc, "Extracting", sys.argv[2], False, False)
+			
+			try:
+				dstfobjc.close()
+			except:
+				pass
+			
+			try:
+				srcfobjc.close()
+			except:
+				pass
+		
+		if (os.name == "posix"):
+			fileobjc = open(srcfname, "rb")
+			devsobjc = open(sys.argv[5], "wb")
+			filesize = os.path.getsize(srcfname)
+			
+			if (filesize < 1):
+				filesize = 1
+			
+			xferfile(fileobjc, filesize, devsobjc, "Installing", sys.argv[2], True, True)
+			
+			try:
+				devsobjc.close()
+			except:
+				pass
+			
+			try:
+				fileobjc.close()
+			except:
+				pass
+		
+		else:
+			makecomd = sharedobj["systemt"].finddata(sharedobj["pathlist"], "dd.exe")
+			makedevf = ("\\\\?\\Device\\" + sys.argv[5] + "\\Partition0")
+			filesize = os.path.getsize(srcfname)
+			
+			blocsize = ("bs=%d" % (2**16))
+			linelist = sharedobj["systemt"].callself(sys.argv[0], ["line"])
+			slowlist = sharedobj["systemt"].callself(sys.argv[0], ["slow"])
+			
+			outpfile(sys.argv[2], "s\1%d\2%s" % (0, "Initializing..."))
+			
+			if ((makecomd) and (filesize > 0)):
+				execlist = [makecomd, "if=/dev/zero", "of=%s" % (makedevf), blocsize, "count=1", "--progress"]
+				xferwins(execlist, [linelist, slowlist], 2**16, "Erasing", sys.argv[2])
+				
+				outpfile(sys.argv[2], "s\1%d\2%s" % (0, "Refreshing disks [please wait]..."))
+				
+				os.system("echo rescan | diskpart.exe")
+				os.system("echo recover | diskpart.exe")
+				os.system("echo rescan | diskpart.exe")
+				
+				os.system("echo recover | diskpart.exe")
+				os.system("echo rescan | diskpart.exe")
+				os.system("echo recover | diskpart.exe")
+				
+				execlist = [makecomd, "if=%s" % (srcfname), "of=%s" % (makedevf), blocsize, "seek=1", "skip=1", "--progress"]
+				xferwins(execlist, [linelist, slowlist], filesize, "Installing", sys.argv[2])
+				
+				execlist = [makecomd, "if=%s" % (srcfname), "of=%s" % (makedevf), blocsize, "count=1", "--progress"]
+				xferwins(execlist, [linelist, slowlist], 2**16, "Formatting", sys.argv[2])
+			
+			outpfile(sys.argv[2], "f\1%d\2%s" % (100, "Finalizing..."))
+	
+	''' end: install file '''

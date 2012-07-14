@@ -1,0 +1,194 @@
+<html>
+    <head>
+        <style>
+            a
+            {
+                text-decoration: none;
+            }
+            
+            .control
+            {
+                color: green;
+            }
+            
+            .list
+            {
+                width: 96%;
+                height: 160px;
+                overflow: auto;
+                text-align: left;
+                border: 1px solid black;
+            }
+            
+            .info
+            {
+                width: 96%;
+                height: 320px;
+            }
+            
+            .state3
+            {
+                color: orange;
+            }
+            
+            .state4
+            {
+                color: red;
+            }
+        </style>
+        
+        <script>
+            var ajaxlight = 0, refreshpkg = "";
+            var offsym = "[ ]", onsym = "[*]";
+            var controlobj, ajaxobj, infoobj;
+            var xmlhttp, dumyhttp;
+            
+            function infodisp()
+            {
+                if (xmlhttp.readyState == 4)
+                {
+                    if (xmlhttp.status == 200)
+                    {
+                        if (infoobj.value != xmlhttp.responseText)
+                        {
+                            infoobj.value = xmlhttp.responseText;
+                            
+                            if (refreshpkg != "")
+                            {
+                                infoobj.scrollTop = infoobj.scrollHeight;
+                            }
+                        }
+                    }
+                    
+                    ajaxlight = 0;
+                    ajaxobj.innerHTML = offsym;
+                }
+            }
+            
+            function postajax(command, pkgname, postdata)
+            {
+                var url = "styrene-cgi";
+                var params = ("ajax=true&comd=" + command + "&name=" + pkgname + "&data=" + encodeURIComponent(postdata));
+                
+                ajaxlight = 1;
+                ajaxobj.innerHTML = onsym;
+                
+                xmlhttp = new XMLHttpRequest();
+                xmlhttp.onreadystatechange = infodisp;
+                xmlhttp.open("POST", url, true);
+                
+                xmlhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                xmlhttp.setRequestHeader("Content-length", params.length);
+                xmlhttp.setRequestHeader("Connection", "close");
+                
+                xmlhttp.send(params);
+            }
+            
+            function sendajax(command, pkgname, dumyflag)
+            {
+                var params = ("?ajax=true&comd=" + command + "&name=" + pkgname);
+                
+                if (dumyflag == 0)
+                {
+                    ajaxlight = 1;
+                    ajaxobj.innerHTML = onsym;
+                    
+                    xmlhttp = new XMLHttpRequest();
+                    xmlhttp.onreadystatechange = infodisp;
+                    
+                    xmlhttp.open("GET", params, true);
+                    xmlhttp.send();
+                }
+                
+                else
+                {
+                    ajaxlight = 0;
+                    ajaxobj.innerHTML = offsym;
+                    
+                    dumyhttp = new XMLHttpRequest();
+                    dumyhttp.onreadystatechange = function() { var doneflag = 1; };
+                    
+                    dumyhttp.open("GET", params, true);
+                    dumyhttp.send();
+                }
+            }
+            
+            function pkgclick(command, pkgname)
+            {
+                var makesure, objstr = "";
+                
+                objstr += (" <b> [ ");
+                objstr += (" <a href=\"javascript:pkgclick('koji', '" + pkgname + "');\" class=\"control\">koji logs</a> | ");
+                objstr += (" <a href=\"javascript:pkgclick('mock', '" + pkgname + "');\" class=\"control\">local mock</a> | ");
+                objstr += (" <a href=\"javascript:pkgclick('getspec', '" + pkgname + "');\" class=\"control\">edit spec</a> | ");
+                objstr += (" <a href=\"javascript:postajax('setspec', '" + pkgname + "', infoobj.value);\" class=\"control\">save spec</a> | ");
+                objstr += (" <a href=\"javascript:pkgclick('build', '" + pkgname + "');\" class=\"control\">koji build</a> ");
+                objstr += (" ] </b> ");
+                objstr += (" &nbsp;&nbsp; ");
+                objstr += (" <b> " + pkgname + " </b> ");
+                
+                controlobj.innerHTML = objstr;
+                
+                if (command == "build")
+                {
+                    makesure = confirm("Are you sure you want to build [" + pkgname + "] in Koji?");
+                    
+                    if (!makesure)
+                    {
+                        return 0;
+                    }
+                }
+                
+                if ((command == "logs") || (command == "mock"))
+                {
+                    refreshpkg = pkgname;
+                    sendajax(command, pkgname, 1);
+                }
+                
+                else
+                {
+                    refreshpkg = "";
+                    sendajax(command, pkgname, 0);
+                }
+            }
+            
+            function loop()
+            {
+                if (ajaxlight == 0)
+                {
+                    if (refreshpkg != "")
+                    {
+                        sendajax("logs", refreshpkg, 0);
+                    }
+                }
+                
+                setTimeout("loop();", 1 * 1000);
+            }
+            
+            function init()
+            {
+                controlobj = document.getElementById("control");
+                ajaxobj = document.getElementById("ajax");
+                infoobj = document.getElementById("info");
+                
+                infoobj.value = "";
+                loop();
+            }
+        </script>
+        
+        <script src="%s?file=processing.js"></script>
+    </head>
+    
+    <body onload="init();">
+        <h2>Package Error Management</h2>
+        <div class="list">%s</div>
+        <br />
+        <span id="control"> &nbsp; </span>
+        <span id="ajax"></span>
+        <br /> <br />
+        <textarea class="info" id="info"></textarea>
+        <br /> <br />
+        <canvas data-processing-sources="%s?file=graph.pde">No canvas!</canvas>
+    </body>
+</html>
+

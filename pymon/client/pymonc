@@ -1,0 +1,694 @@
+#!/usr/bin/python
+
+import ast
+import fcntl
+import getopt
+import grp
+import os
+import platform
+import pwd
+import re
+import rpm
+import socket
+import stat
+import struct
+import sys
+import time
+import urllib
+
+''' beg: helpers '''
+
+def readconf(itemname, filename):
+	output = []
+	
+	try:
+		fileobjc = open(filename, "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for fileline in filelist:
+		fileline = fileline.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^%s[ ]+=[ ]+(.*)$" % (itemname), fileline, re.I)
+		
+		if (regxobjc):
+			output = ast.literal_eval(regxobjc.group(1))
+	
+	return output
+
+def permform(permoctl, special, symbol):
+	permlist = [4, 2, 1]
+	permsymb = {4:"r", 2:"w", 1:"x", 0:"-"}
+	output = ""
+	
+	for permnumb in permlist:
+		if ((permnumb == 1) and (special > 0)):
+			if ((permoctl & permnumb) > 0):
+				permsymb[permnumb] = symbol[0]
+			else:
+				permsymb[permnumb] = symbol[1]
+		
+		output += permsymb[permoctl & permnumb]
+	
+	return "".join(output)
+
+def permstat(filename):
+	typelist = [[stat.S_IFBLK,"b"],[stat.S_IFCHR,"c"],[stat.S_IFDIR,"d"],[stat.S_IFIFO,"p"],[stat.S_IFSOCK,"s"],[stat.S_IFREG,"-"],[stat.S_IFLNK,"l"]]
+	output = ["?", "---", "---", "---", "?", "?"]
+	
+	try:
+		perminfo = os.lstat(filename)
+		extra = ((perminfo.st_mode >> 9) & 0x7)
+		
+		for filetype in typelist:
+			if ((perminfo.st_mode & filetype[0]) == filetype[0]):
+				output[0] = filetype[1]
+		
+		output[1] = permform((perminfo.st_mode >> 0) & 0x7, extra & 4, ["s", "S"])
+		output[2] = permform((perminfo.st_mode >> 3) & 0x7, extra & 2, ["s", "S"])
+		output[3] = permform((perminfo.st_mode >> 6) & 0x7, extra & 1, ["t", "T"])
+		
+		usernumb = str(perminfo.st_uid)
+		grpnumb = str(perminfo.st_gid)
+	
+	except:
+		usernumb = "?"
+		grpnumb = "?"
+	
+	try:
+		userinfo = pwd.getpwuid(perminfo.st_uid)
+	except:
+		userinfo = ["?"]
+	
+	try:
+		grpinfo = grp.getgrgid(perminfo.st_gid)
+	except:
+		grpinfo = ["?"]
+	
+	output[4] = (usernumb + "(" + userinfo[0] + ")")
+	output[5] = (grpnumb + "(" + grpinfo[0] + ")")
+	
+	return ["".join(output[0:4]), output[4], output[5]]
+
+def hextoadr(hexstr):
+	stri = 0; hexi = 6
+	output = ["0", "0", "0", "0"]
+	
+	while (stri < 4):
+		endi = (hexi + 2)
+		output[stri] = str(int(hexstr[hexi:endi], 16))
+		stri += 1; hexi -= 2
+	
+	return ".".join(output)
+
+def smalmask(hexstr):
+	a = hextoadr(hexstr).split(".")
+	maskdata = 0
+	masknumb = 32
+	
+	for x in range(0, len(a)):
+		maskdata += (int(a[x]) * (256 ** (3 - x)))
+	
+	for x in range(0, 32):
+		if ((maskdata & 1) == 1):
+			break
+		maskdata = (maskdata >> 1)
+		masknumb = (masknumb - 1)
+	
+	return str(masknumb)
+
+''' end: helpers '''
+
+def machname():
+	try:
+		return socket.gethostname()
+	except:
+		return "(empty)"
+
+def ramstats():
+	output = [0, 0, 0, 0]
+	
+	try:
+		fileobjc = open("/proc/meminfo", "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for lineread in filelist:
+		lineread = lineread.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^memfree:[^0-9]*([0-9]+).*$", lineread, re.I)
+		
+		if (regxobjc):
+			output[0] = int(regxobjc.group(1))
+		
+		regxobjc = re.match("^memtotal:[^0-9]*([0-9]+).*$", lineread, re.I)
+		
+		if (regxobjc):
+			output[1] = int(regxobjc.group(1))
+		
+		regxobjc = re.match("^swapfree:[^0-9]*([0-9]+).*$", lineread, re.I)
+		
+		if (regxobjc):
+			output[2] = int(regxobjc.group(1))
+		
+		regxobjc = re.match("^swaptotal:[^0-9]*([0-9]+).*$", lineread, re.I)
+		
+		if (regxobjc):
+			output[3] = int(regxobjc.group(1))
+	
+	return output
+
+''' beg: system '''
+
+def machrels(filename="/etc/fedora-release"):
+	try:
+		fileobjc = open(filename, "r")
+		fileline = fileobjc.readline().replace("\t", " ").strip()
+		fileobjc.close()
+	except:
+		fileline = ""
+	
+	return fileline
+
+def machvers():
+	return platform.release()
+
+def machtime():
+	return time.strftime("%Y/%m/%d-%H:%M:%S-UTC", time.gmtime())
+
+def machinfo(dictlist):
+	menuitem = {"name":"System", "subs":[]}
+	
+	
+	subsitem = {"name":"Information", "cols":[]}
+	
+	colsitem = {"name":"Release", "value":machrels()}
+	subsitem["cols"].append(colsitem)
+	
+	colsitem = {"name":"Version", "value":machvers()}
+	subsitem["cols"].append(colsitem)
+	
+	colsitem = {"name":"Time", "value":machtime()}
+	subsitem["cols"].append(colsitem)
+	
+	
+	menuitem["subs"].append(subsitem)
+	
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: system '''
+
+''' beg: network '''
+
+def inetipvf():
+	output = []
+	
+	try:
+		fileobjc = open("/proc/net/route", "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for fileline in filelist:
+		fileline = fileline.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^([^ ]+)[ ]+([0-9A-F]{8})[ ]+([0-9A-F]{8}).*([0-9A-F]{8}).*$", fileline, re.I)
+		
+		if (regxobjc):
+			intfname = regxobjc.group(1)
+			intfaddr = hextoadr(regxobjc.group(2))
+			intfdest = hextoadr(regxobjc.group(3))
+			intfmask = smalmask(regxobjc.group(4))
+			
+			if (intfdest == "0.0.0.0"):
+				sockobjc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+				addrdata = fcntl.ioctl(sockobjc.fileno(), 0x8915, struct.pack("256s", intfname[:15]))
+				intfaddr = socket.inet_ntoa(addrdata[20:24])
+				
+				itemname = ("Interface: " + intfname)
+				output.append({"subs":itemname, "cols":["Interface", "IPv4", "Mask"], "data":[intfname, intfaddr, "/" + intfmask]})
+	
+	return output
+
+def inetrout():
+	output = []
+	
+	try:
+		fileobjc = open("/proc/net/route", "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for fileline in filelist:
+		fileline = fileline.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^([^ ]+)[ ]+([0-9A-F]{8})[ ]+([0-9A-F]{8}).*([0-9A-F]{8}).*$", fileline, re.I)
+		
+		if (regxobjc):
+			intfname = regxobjc.group(1)
+			intfdest = hextoadr(regxobjc.group(2))
+			intfgate = hextoadr(regxobjc.group(3))
+			intfmask = smalmask(regxobjc.group(4))
+			
+			if (intfgate != "0.0.0.0"):
+				itemname = ("Route: " + intfdest + "/" + intfmask)
+				output.append({"subs":itemname, "cols":["Type", "Destination", "Mask", "Interface", "Gateway"], "data":["Route", intfdest, "/" + intfmask, intfname, intfgate]})
+	
+	return output
+
+def inetname():
+	output = [{"subs":"DNS", "cols":["Type", "Server"], "data":["DNS", ""]}]
+	
+	try:
+		fileobjc = open("/etc/resolv.conf", "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for fileline in filelist:
+		fileline = fileline.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^nameserver[ ]+([^ ]*).*$", fileline, re.I)
+		
+		if (regxobjc):
+			if (output[0]["data"][1] != ""):
+				output[0]["data"][1] += ", "
+			output[0]["data"][1] += (regxobjc.group(1))
+	
+	return output
+
+def machinet(dictlist):
+	menuitem = {"name":"Network", "subs":[]}
+	
+	for listitem in [inetipvf(), inetrout(), inetname()]:
+		for dictitem in listitem:
+			subsitem = {"name":dictitem["subs"], "cols":[]}
+			
+			for x in range(0, len(dictitem["cols"])):
+				colsitem = {"name":dictitem["cols"][x], "value":dictitem["data"][x]}
+				subsitem["cols"].append(colsitem)
+			
+			menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: network '''
+
+''' beg: mounts '''
+
+def mntstats(dictlist, cfgsfile):
+	menuitem = {"name":"Mounts", "subs":[]}
+	
+	mntlist = readconf("mntlist", cfgsfile)
+	
+	try:
+		fileobjc = open("/etc/mtab", "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for itemname in mntlist:
+		subsitem = {"name":itemname, "cols":[]}
+		
+		infolist = [itemname, "", ""]
+		
+		for lineread in filelist:
+			lineread = lineread.replace("\t", " ").strip()
+			
+			regxobjc = re.match("^(.*)[ ]+(%s)[ ]+(fat|ntfs|ext|nfs)([0-9]*)[ ]+([^ ]+).*$" % (itemname), lineread, re.I)
+			
+			if (regxobjc):
+				typevers = (regxobjc.group(3) + regxobjc.group(4))
+				mntopts = regxobjc.group(5)
+				mntopts = re.sub(",[^,]+=[^,]+", "", mntopts)
+				
+				infolist[1] = typevers
+				infolist[2] = mntopts
+		
+		colslist = ["Mount", "Type", "Options"]
+		
+		for x in range(0, len(colslist)):
+			colsitem = {"name":colslist[x], "value":infolist[x]}
+			subsitem["cols"].append(colsitem)
+		
+		menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: mounts '''
+
+''' beg: dirs '''
+
+def shrinks(a, b):
+	letrindx = 0
+	letrlist = "BKMGTPEZY"
+	
+	a = float(a)
+	b = float(b)
+	
+	while ((a > 999) or (b > 999)):
+		letrindx += 1
+		a /= 1000
+		b /= 1000
+	
+	if (int(a) < 10):
+		a = int(a * 10)
+		a = float(float(a) / float(10))
+	else:
+		a = int(a)
+	
+	if (int(b) < 10):
+		b = int(b * 10)
+		b = float(float(b) / float(10))
+	else:
+		b = int(b)
+	
+	return (str(a) + letrlist[letrindx] + "/" + str(b) + letrlist[letrindx])
+
+def dirstats(foldname="/"):
+	output = [""]
+	
+	try:
+		statinfo = os.statvfs(foldname)
+		freenumb = (statinfo.f_bavail * statinfo.f_bsize)
+		totalnum = (statinfo.f_blocks * statinfo.f_bsize)
+		percent = ((freenumb * 100) / totalnum)
+	
+	except:
+		freenumb = 0
+		totalnum = 0
+		percent = 0
+	
+	output = [shrinks(totalnum - freenumb, totalnum) + "(" + str(percent) + "% free)"]
+	
+	return output
+
+def dirhelp(dictlist, cfgsfile):
+	menuitem = {"name":"Directories", "subs":[]}
+	
+	dirlist = readconf("dirlist", cfgsfile)
+	
+	for itemname in dirlist:
+		subsitem = {"name":itemname, "cols":[]}
+		
+		infolist = [itemname]
+		
+		for permitem in permstat(itemname):
+			infolist.append(permitem)
+		
+		for diritem in dirstats(itemname):
+			infolist.append(diritem)
+		
+		colslist = ["Directory", "Permissions", "Owner", "Group", "Size"]
+		
+		for x in range(0, len(colslist)):
+			colsitem = {"name":colslist[x], "value":infolist[x]}
+			subsitem["cols"].append(colsitem)
+		
+		menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: dirs '''
+
+''' beg: files '''
+
+def findbins(binset):
+	pathlist = ["/sbin", "/bin", "/usr/sbin", "/usr/bin", "/usr/local/sbin", "/usr/local/bin"]
+	output = []
+	
+	for binitem in binset:
+		output.append(binitem)
+	
+	for pathitem in pathlist:
+		for x in range(0, len(binset)):
+			filepath = (pathitem + "/" + binset[x])
+			
+			if (os.path.exists(filepath)):
+				output[x] = filepath
+	
+	return output
+
+def filehelp(dictlist, cfgsfile, dataname, colsname):
+	menuitem = {"name":dataname, "subs":[]}
+	
+	if (dataname == "Binaries"):
+		filelist = readconf("binlist", cfgsfile)
+	
+	else:
+		filelist = readconf("cfglist", cfgsfile)
+	
+	if (dataname == "Binaries"):
+		binlist = filelist
+		filelist = findbins(filelist)
+	
+	for itemname in filelist:
+		filename = itemname
+		
+		if (dataname == "Binaries"):
+			fileindx = filelist.index(itemname)
+			itemname = binlist[fileindx]
+		
+		subsitem = {"name":itemname, "cols":[]}
+		
+		infolist = [filename]
+		
+		for permitem in permstat(filename):
+			infolist.append(permitem)
+		
+		colslist = [colsname, "Permissions", "Owner", "Group"]
+		
+		for x in range(0, len(colslist)):
+			colsitem = {"name":colslist[x], "value":infolist[x]}
+			subsitem["cols"].append(colsitem)
+		
+		menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: files '''
+
+''' beg: pkgs '''
+
+def pkgstat(dictlist, cfgsfile):
+	menuitem = {"name":"Packages", "subs":[]}
+	
+	pkglist = readconf("pkglist", cfgsfile)
+	pkginfo = []
+	
+	for pkgname in pkglist:
+		pkginfo.append([pkgname, "", ""])
+	
+	try:
+		transet = rpm.TransactionSet()
+		rpmset = transet.dbMatch()
+		
+		for pkgitem in rpmset:
+			try:
+				pkgindx = pkglist.index(pkgitem["name"])
+				pkginfo[pkgindx][1] = pkgitem["version"]
+				pkginfo[pkgindx][2] = pkgitem["release"]
+			
+			except:
+				pass
+	
+	except:
+		pass
+	
+	for infolist in pkginfo:
+		subsitem = {"name":infolist[0], "cols":[]}
+		
+		colslist = ["Package", "Version", "Release"]
+		
+		for x in range(0, len(colslist)):
+			colsitem = {"name":colslist[x], "value":infolist[x]}
+			subsitem["cols"].append(colsitem)
+		
+		menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: pkgs '''
+
+''' beg: services '''
+
+def pidconf(filename):
+	repldict = {}
+	output = ""
+	
+	try:
+		fileobjc = open(filename, "r")
+		filelist = fileobjc.readlines()
+		fileobjc.close()
+	except:
+		filelist = []
+	
+	for lineread in filelist:
+		lineread = lineread.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^([0-9A-Za-z]+)=(.*)$", lineread, re.I)
+		
+		if (regxobjc):
+			repldict[regxobjc.group(1)] = regxobjc.group(2)
+	
+	for lineread in filelist:
+		lineread = lineread.replace("\t", " ").strip()
+		
+		regxobjc = re.match("^pidfile=(.*)$", lineread, re.I)
+		
+		if (regxobjc):
+			output = regxobjc.group(1)
+	
+	for varkey in repldict.keys():
+		output = output.replace("$" + varkey, repldict[varkey])
+	
+	return output
+
+def servstat(servname):
+	pidlist = []
+	output = ["Disabled", "Inactive"]
+	
+	for x in range(0, 7):
+		foldname = ("/etc/rc%d.d" % (x))
+		
+		try:
+			filelist = os.listdir(foldname)
+		except:
+			filelist = []
+		
+		for fileitem in filelist:
+			if (re.match("^s[0-9]+%s" % (servname), fileitem, re.I)):
+				output[0] = "Enabled"
+				pidfile = pidconf(foldname + "/" + fileitem)
+				
+				if (pidfile):
+					pidlist.append(pidfile)
+	
+	servfile = ("/lib/systemd/system/%s.service" % (servname))
+	
+	if (os.path.exists(servfile)):
+		output[0] = "Enabled"
+		pidfile = pidconf(servfile)
+		
+		if (pidfile):
+			pidlist.append(pidfile)
+	
+	pidfile = ("/sys/fs/cgroup/systemd/system/%s.service/tasks" % (servname))
+	
+	if (os.path.exists(pidfile)):
+		pidlist.append(pidfile)
+	
+	for piditem in pidlist:
+		try:
+			fileobjc = open(piditem, "r")
+			numblist = fileobjc.readlines()
+			fileobjc.close
+		
+		except:
+			numblist = []
+		
+		for numbitem in numblist:
+			numbitem = numbitem.replace("\t", " ").strip()
+			
+			if (re.match("^[0-9]+$", numbitem)):
+				if (os.path.exists("/proc/%s" % (numbitem))):
+					output[1] = "Active"
+	
+	return output
+
+def servhelp(dictlist, cfgsfile):
+	menuitem = {"name":"Services", "subs":[]}
+	
+	srvlist = readconf("srvlist", cfgsfile)
+	
+	for srvname in srvlist:
+		subsitem = {"name":srvname, "cols":[]}
+		
+		infolist = [srvname]
+		
+		for statitem in servstat(srvname):
+			infolist.append(statitem)
+		
+		colslist = ["Service", "Startup", "Status"]
+		
+		for x in range(0, len(colslist)):
+			colsitem = {"name":colslist[x], "value":infolist[x]}
+			subsitem["cols"].append(colsitem)
+		
+		menuitem["subs"].append(subsitem)
+	
+	dictlist.append(menuitem)
+	
+	return dictlist
+
+''' end: services '''
+
+def main():
+	conffile = ""
+	hostname = ""
+	password = ""
+	
+	try:
+		(opts, args) = getopt.getopt(sys.argv[1:], "c:h:p:")
+	except:
+		print("Usage: pymonc -c config -h server -p password")
+		sys.exit(0)
+	
+	for item in opts:
+		if (item[0] == "-c"):
+			conffile = item[1]
+		
+		if (item[0] == "-h"):
+			hostname = item[1]
+		
+		if (item[0] == "-p"):
+			password = item[1]
+	
+	if ((conffile == "") or (hostname == "") or (password == "")):
+		print("Usage: pymonc -c config -h server -p password")
+		sys.exit(0)
+	
+	statdata = {
+		"Name":machname(),
+		"Pass":password,
+		"Data":[]
+	}
+	
+	statdata["Data"] = machinfo(statdata["Data"])
+	statdata["Data"] = machinet(statdata["Data"])
+	statdata["Data"] = mntstats(statdata["Data"], conffile)
+	statdata["Data"] = dirhelp(statdata["Data"], conffile)
+	statdata["Data"] = filehelp(statdata["Data"], conffile, "Binaries", "Binary")
+	statdata["Data"] = filehelp(statdata["Data"], conffile, "Configs", "Config")
+	statdata["Data"] = pkgstat(statdata["Data"], conffile)
+	statdata["Data"] = servhelp(statdata["Data"], conffile)
+	
+	try:
+		paramobj = urllib.urlencode(statdata)
+		urllib.urlopen(hostname, paramobj)
+	except:
+		pass
+
+if (__name__ == "__main__"):
+	main()

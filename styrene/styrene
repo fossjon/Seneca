@@ -1,0 +1,325 @@
+#!/usr/bin/python
+"""Command-line interface for styrene."""
+
+
+import getopt
+import os
+import re
+import sys
+import time
+
+sys.path.insert(0, "/usr/share/styrene-lib")
+sys.path.insert(0, os.path.dirname(sys.argv[0]) + "/styrene-lib")
+
+import styrene
+
+
+# define some commonly shared variables
+
+usagestr = ("Usage: %s <command>" % (os.path.basename(sys.argv[0])))
+usagestr += "\t[--db=<db name>] [--release=<release number>] [--kojihub=<koji url>] [--kojitag=<tag name>]\n"
+usagestr += "\t\t\t\t[--binrepo=<bin repo>] [--srcrepo=<src repo>] [--srcarch=<src arch>]\n"
+usagestr += "\t\t\t\t[--pkg=<pkg name>] [--state=<pkg state>] [--comment=<pkg comment>] [--override=<envr override>]\n"
+usagestr += "\t\t\t\t[--num=<general number>] [--time=<time in seconds>]\n"
+usagestr += "\nCommands:\n"
+usagestr += "\n(Db Operations)\n"
+usagestr += "\t\t\tload-db\t\t\tCreate and load a local database with packages from a specific architecture\n"
+usagestr += "\t\t\tupdate-db\t\tAppend a local database with packages from a specific architecture\n"
+usagestr += "\n(Pkg Info)\n"
+usagestr += "\t\t\tlist-unbuilt\t\tDisplay a list of currently unbuilt packages\n"
+usagestr += "\t\t\tlist-ready\t\tList any packages that are ready to be built (all dependencies satisfied)\n"
+usagestr += "\t\t\tpkg-info\t\tDisplay various package info/stats from the local db\n"
+usagestr += "\t\t\tmark-pkg\t\tMark a pkg state in the local db\n"
+usagestr += "\n(Koji Info)\n"
+usagestr += "\t\t\tkoji-info\t\tGet various info/stats for a pkg from koji\n"
+usagestr += "\t\t\tkoji-prev\t\tPrint the latest built version of a package if one exists\n"
+usagestr += "\t\t\tkoji-equiv\t\tCheck to see if koji has a pkg version that is >= to this local db version\n"
+usagestr += "\t\t\tkoji-que\t\tSend a package to koji for a build attempt\n"
+usagestr += "\t\t\tkoji-tasks\t\tList the current active tasks for this user\n"
+usagestr += "\n(Auto Building)\n"
+usagestr += "\t\t\tmark-db\t\t\tforeach (list-unbuilt) use (koji-info) to (mark-pkg)\n"
+usagestr += "\t\t\tque-ready\t\tforeach (list-ready) use (koji-tasks) to throttle (koji-que)\n"
+usagestr += "\n(Web Interface)\n"
+usagestr += "\t\t\tcgi-bin\t\t\tGenerate a CSS/HTML/JavaScript (web-based) interface\n"
+usagestr += "\n(Pkg Fixing)\n"
+usagestr += "\t\t\tfix-spec\t\tAttempt to auto-fix a non-building SRPM by auto-merging old spec file changes\n"
+usagestr += "\n(Misc Cmds)\n"
+usagestr += "\t\t\tshow-vars\t\tPrint the different variable values for info purposes\n"
+usagestr += "\t\t\tshow-deps\t\tLook up the related dependencies for a given pkg\n"
+usagestr += "\t\t\tbuild-model\t\tRun a continuous loop to simulate a build order until the pkgs aren't satisfied (modifies the model field)\n"
+usagestr += "\n(Example)\n"
+usagestr += "\t\t\t~/.styrene.conf"
+usagestr += "\t\tdb = /tmp/ps.db\n"
+usagestr += "\t\t\t\t\t\tkojitag = dist-f13-updates\n"
+usagestr += "\t\t\t\t\t\trelease = 13\n"
+usagestr += "\t\t\t\t\t\tbinrepo = updates\n"
+usagestr += "\t\t\t\t\t\tsrcrepo = updates-source\n"
+
+confdict = {}
+
+
+# process the command line arguments
+
+if (len(sys.argv) < 2):
+    print(usagestr)
+    sys.exit(0)
+
+try:
+    optlist, args = getopt.getopt(sys.argv[2:], "", ["db=", "release=", "kojihub=", "kojitag=", "binrepo=", "srcrepo=", "srcarch=", "pkg=", "state=", "comment=", "override=", "num=", "time="])
+
+except:
+    print(usagestr)
+    sys.exit(0)
+
+for optitem in optlist:
+    optname = optitem[0].replace("--", "")
+    confdict[optname] = optitem[1]
+
+
+# setup some last minute shared variables
+
+styobj = styrene.styreneBase(confdict)
+
+
+# define some common functions
+
+def dispMarked(pkglist, pkgname, pkgstate):
+    print("[%d] packages marked matching [%s]" % (len(pkglist), pkgname))
+    
+    for pkg in pkglist:
+        print("\t[%s] state [%d] -> [%d]" % (pkg[0], pkg[1], pkgstate))
+
+def markDb():
+    global styobj
+    
+    for pkgitem in styobj.listUnbuilt():
+        outpflag = 0
+        
+        # request the status of a pkg both locally and remotely to compare the states
+        loclist = styobj.checkPkgKoji(pkgitem, local=True, string=False)
+        remlist = styobj.checkPkgKoji(pkgitem, local=False, string=False)
+        
+        locstate = int(loclist[0][1])
+        remstate = int(remlist[0][1])
+        
+        if (locstate != remstate):
+            pkglist = styobj.markPkgByGlob(pkgitem, stateflag=remstate, comment="", flush=True)
+            dispMarked(pkglist, pkgitem, remstate)
+            outpflag = 1
+        
+        if (outpflag == 0):
+            print("no db change for [%s] with state [%d]" % (pkgitem, remstate))
+            outpflag = 1
+
+
+if ((sys.argv[1] == "load-db") or (sys.argv[1] == "update-db")):
+    # if load db then drop and create tables first
+    
+    if (sys.argv[1] == "load-db"):
+        styobj.createDb()
+    
+    styobj.loadDbKoji()
+
+elif (sys.argv[1] == "list-unbuilt"):
+    # print a list of unbuilt pkgs
+    
+    for pkgitem in styobj.listUnbuilt():
+        print(pkgitem)
+
+elif (sys.argv[1] == "list-ready"):
+    # display a list of pkgs assumed to be ready for building
+    
+    for pkgitem in styobj.getQueuePass():
+        print(pkgitem)
+
+elif ((sys.argv[1] == "pkg-info") or (sys.argv[1] == "koji-info")):
+    if ("pkg" not in confdict.keys()):
+        print("This sub-command needs { --pkg } options")
+        sys.exit(0)
+    
+    # read as much pkg info either locally or remotely
+    
+    localFlag = True
+    
+    if (sys.argv[1] == "koji-info"):
+        localFlag = False
+    
+    pkginfo = styobj.checkPkgKoji(confdict["pkg"], local=localFlag, logs=True)
+    print(pkginfo)
+
+elif (sys.argv[1] == "mark-pkg"):
+    if ("state" not in confdict.keys()):
+        print("This sub-command needs { --pkg && --state } [ --comment ] [ --override ] options")
+        sys.exit(0)
+    
+    # mark a pkg with the specified options in our local db
+    
+    pkgname = None
+    
+    if ("pkg" in confdict.keys()):
+        pkgname = confdict["pkg"]
+    
+    statenum = int(confdict["state"])
+    
+    if ("comment" not in confdict.keys()):
+        confdict["comment"] = None
+    
+    if ("override" not in confdict.keys()):
+        confdict["override"] = None
+    
+    while (1):
+        if (not pkgname):
+            pkgname = sys.stdin.readline()
+        
+        if (not pkgname):
+            break
+        
+        pkgname = pkgname.strip()
+        pkglist = styobj.markPkgByGlob(pkgname, stateflag=statenum, comment=confdict["comment"], envro=confdict["override"])
+        
+        dispMarked(pkglist, pkgname, statenum)
+        pkgname = None
+
+elif (sys.argv[1] == "koji-prev"):
+    if ("pkg" not in confdict.keys()):
+        print("This sub-command needs { --pkg } options")
+        sys.exit(0)
+    
+    # get the latest built version of a pkg if it exists
+    
+    pkgname = styobj.listPrevKoji(confdict["pkg"])
+    
+    if (pkgname):
+        print(pkgname)
+
+elif (sys.argv[1] == "koji-equiv"):
+    if ("pkg" not in confdict.keys()):
+        print("This sub-command needs { --pkg } options")
+        sys.exit(0)
+    
+    # attempt to find an already built pkg with >= version #
+    
+    pkgname = styobj.equivPkgKoji(confdict["pkg"])
+    
+    if (pkgname):
+        print(pkgname)
+
+elif (sys.argv[1] == "koji-que"):
+    if ("pkg" not in confdict.keys()):
+        print("This sub-command needs { --pkg } options")
+        sys.exit(0)
+    
+    # attempt to send a pkg for a remote build
+    
+    remoteurl = styobj.buildPkgKoji(confdict["pkg"])
+    
+    if (remoteurl):
+        print(confdict["pkg"] + " " + remoteurl)
+
+elif (sys.argv[1] == "koji-tasks"):
+    for taskitem in styobj.listTasksKoji():
+        print(taskitem)
+
+elif (sys.argv[1] == "mark-db"):
+    markDb()
+
+elif (sys.argv[1] == "que-ready"):
+    # loop thru the list of ready pkgs and que them for build
+    
+    tasknumb = 10
+    tasktime = (10 * 60)
+    
+    pkglist = styobj.getQueuePass()
+    
+    if ("num" in confdict.keys()):
+        tasknumb = int(confdict["num"])
+    
+    if ("time" in confdict.keys()):
+        tasktime = int(confdict["time"])
+    
+    pkgindx = 0
+    pkgleng = len(pkglist)
+    
+    while (pkgindx < pkgleng):
+        #markDb()
+        
+        tasklist = styobj.listTasksKoji(mine=True)
+        taskleng = len(tasklist)
+        
+        sys.stdout.write("beg loop: user tasks [%d / %d]\n" % (taskleng, tasknumb))
+        
+        while ((pkgindx < pkgleng) and (taskleng < tasknumb)):
+            remoteurl = styobj.buildPkgKoji(pkglist[pkgindx])
+            pkgindx += 1
+            
+            if (remoteurl):
+                taskleng += 1
+            
+            print("[%d/%d] [%d/%d] [%s] %s" % (pkgindx, pkgleng, taskleng, tasknumb, pkglist[pkgindx - 1], remoteurl))
+        
+        sys.stdout.write("end loop: sleeping [%d]\n" % (tasktime))
+        time.sleep(tasktime)
+
+elif (sys.argv[1] == "cgi-bin"):
+    htmloutp = styobj.visual()
+    print(htmloutp)
+
+elif (sys.argv[1] == "fix-spec"):
+    if ("pkg" not in confdict.keys()):
+        print("This sub-command needs { --pkg } options")
+        sys.exit(0)
+    
+    styobj.fixBridge(confdict["pkg"])
+
+elif (sys.argv[1] == "show-vars"):
+    outp = styobj.dispVars()
+    print(outp)
+
+elif (sys.argv[1] == "show-deps"):
+    pkgname = None
+    
+    if ("pkg" in confdict.keys()):
+        pkgname = confdict["pkg"]
+    
+    while (1):
+        if (not pkgname):
+            pkgname = sys.stdin.readline()
+        
+        if (not pkgname):
+            break
+        
+        pkgname = pkgname.strip()
+        dblist = styobj.getDeps(pkgname)
+        
+        for dbline in dblist:
+            print(dbline)
+        
+        print(pkgname + " = " + str(len(dblist)))
+        
+        pkgname = None
+
+elif (sys.argv[1] == "build-model"):
+    passnumber = 0
+    print "Start:\tPackages built: %s\tUnbuilt: %s\tTotal: %s" % (styobj.builtGoalCount(), styobj.unbuiltGoalCount(), styobj.allGoalCount())
+    
+    while True:
+        pkgs = styobj.getQueuePass()
+        
+        if len(pkgs) == 0:
+            break
+        
+        passnumber += 1
+        print "Pass %s - %s packages:" % (passnumber, len(pkgs))
+        for pkg in pkgs:
+            print "\t%s" % pkg
+        
+        styobj.dummyBuildPass()
+    
+    print "End:\tPackages built: %s\tUnbuilt: %s\tTotal: %s" % (styobj.builtGoalCount(), styobj.unbuiltGoalCount(), styobj.allGoalCount())
+
+else:
+    print(usagestr)
+    sys.exit(0)
+
+styobj.closeDb()
+
