@@ -33,5 +33,5 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/styrene
 
 %changelog
-* Mon Jul 4 2010 Jon Chiappetta <jchiappetta@learn.senecac.on.ca> 0.1
+* Mon Jul 4 2010 Jon Chiappetta <jonc_mailbox@yahoo.ca> 0.1
 - init release
