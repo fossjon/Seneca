@@ -1,0 +1,993 @@
+#!/usr/bin/python
+#
+# Moji :: Mini Koji-like server/client
+#
+
+import cgi
+import grp
+import pwd
+import hashlib
+import os
+import random
+import re
+import select
+import socket
+import sys
+import time
+import traceback
+
+portnumb = 9999
+versnumb = 0.1
+password = ""
+lockfile = "/tmp/moji.lock"
+tempfold = "/tmp"
+
+if (os.getuid() == 0):
+	(uidi, gidi) = pwd.getpwnam("moji")[2:4]
+	os.setgroups([grp.getgrnam("moji")[2]])
+	os.setregid(gidi, gidi)
+	os.setreuid(uidi, uidi)
+
+def safenumb(numbstri):
+	try:
+		return int(numbstri)
+	
+	except:
+		return -1
+
+def formdate():
+	return time.strftime("%y/%m/%d-%H:%M:%S", time.localtime())
+
+def safefold(foldpath):
+	foldpath = foldpath.replace("\t", "")
+	foldpath = foldpath.replace("\r", "")
+	foldpath = foldpath.replace("\n", "")
+	foldpath = foldpath.replace("<", "")
+	foldpath = foldpath.replace("&", "")
+	foldpath = foldpath.replace("\\", "")
+	foldpath = foldpath.replace("'", "")
+	foldpath = re.sub("\.\.[\.]*", "", foldpath)
+	
+	return foldpath
+
+def safeexec(bashcomd):
+	print("[%s] exec [%s]" % (formdate(), bashcomd))
+	
+	os.system(bashcomd)
+
+def safelist(foldpath):
+	try:
+		return os.listdir(foldpath)
+	
+	except:
+		return []
+
+def safesize(filepath):
+	try:
+		return os.path.getsize(filepath)
+	
+	except:
+		return 0
+
+def safefork():
+	try:
+		return os.fork()
+	
+	except:
+		return -1
+
+def readfile(filepath):
+	outplist = []
+	
+	try:
+		fileobjc = open(filepath, "r")
+		
+		while (1):
+			fileline = fileobjc.readline()
+			
+			if (not fileline):
+				break
+			
+			fileline = fileline.strip()
+			
+			if (fileline):
+				outplist.append(fileline)
+		
+		fileobjc.close()
+	
+	except:
+		pass
+	
+	return outplist
+
+def hashfile(filepath):
+	hashobjc = hashlib.md5()
+	
+	try:
+		fileobjc = open(filepath, "r")
+		
+		while (1):
+			filedata = fileobjc.read(2**23)
+			
+			if (not filedata):
+				break
+			
+			hashobjc.update(filedata)
+		
+		fileobjc.close()
+		
+		return hashobjc.hexdigest()
+	
+	except:
+		return "None"
+
+def saferemo(foldpref, foldpath):
+	foldpath = safefold(foldpath)
+	
+	while (1):
+		foldpath = os.path.dirname(foldpath)
+		
+		if (not foldpath):
+			break
+		
+		if (re.match("^.*[0-9A-Za-z].*$", foldpath)):
+			safeexec("rm -fr '%s/%s'" % (foldpref, foldpath))
+
+def safemove(sorcpath, destpath, remoflag=True):
+	foldpath = os.path.dirname(destpath)
+	
+	print("[%s] move [%s] -> [%s]" % (formdate(), sorcpath, destpath))
+	
+	try:
+		if (remoflag):
+			os.unlink(destpath)
+	
+	except:
+		#traceback.print_exc(file=sys.stdout)
+		pass
+	
+	try:
+		if (foldpath):
+			os.makedirs(foldpath)
+	
+	except:
+		#traceback.print_exc(file=sys.stdout)
+		pass
+	
+	if (sorcpath):
+		safeexec("mv '%s' '%s' 2> /dev/null" % (sorcpath, destpath))
+
+def mockname(foldpath, foldname):
+	tempname = ("mock.%s" % (re.sub("\.src\.rpm$", "", foldname)))
+	
+	if (foldpath != ""):
+		tempname = (foldpath + "/" + tempname)
+	
+	return tempname
+
+sock_objcdict = {}
+sock_datadict = {}
+
+def sockadds(sockobjc, sockstri=""):
+	global sock_objcdict
+	
+	if (sockstri == ""):
+		sockstri = str(sockobjc)
+	
+	sock_objcdict[sockstri] = sockobjc
+
+def sockrepl(soldname, snewname):
+	global sock_objcdict
+	global sock_datadict
+	
+	if (not re.match("^.*[0-9A-Za-z].*$", snewname)):
+		return 0
+	
+	if ((soldname in sock_objcdict.keys()) and (soldname in sock_datadict.keys())):
+		if ((snewname not in sock_objcdict.keys()) and (snewname not in sock_datadict.keys())):
+			sock_objcdict[snewname] = sock_objcdict[soldname]
+			del sock_objcdict[soldname]
+			
+			sock_datadict[snewname] = sock_datadict[soldname]
+			del sock_datadict[soldname]
+			
+			return 1
+	
+	return 0
+
+def sockremo(sockstri):
+	global sock_objcdict
+	global sock_datadict
+	
+	try:
+		sock_objcdict[sockstri].shutdown(socket.SHUT_RDWR)
+	
+	except:
+		pass
+	
+	try:
+		sock_objcdict[sockstri].close()
+	
+	except:
+		pass
+	
+	if (sockstri in sock_objcdict.keys()):
+		del sock_objcdict[sockstri]
+	
+	if (sockstri in sock_datadict.keys()):
+		del sock_datadict[sockstri]
+
+def sockread(datalist=[]):
+	global sock_objcdict
+	global sock_datadict
+	
+	k = sock_objcdict.keys()
+	v = []
+	tuploutp = None
+	
+	for i in k:
+		v.append(sock_objcdict[i])
+	
+	remolist = []
+	(inptlist, outplist, errolist) = select.select(v, [], [], 0)
+	
+	for sockitem in v:
+		if (sockitem in inptlist):
+			sockname = k[v.index(sockitem)]
+			
+			try:
+				tempdata = sockitem.recv(2**23)
+				
+				if (not tempdata):
+					remolist.append(sockitem)
+				
+				else:
+					if (sockname not in sock_datadict.keys()):
+						sock_datadict[sockname] = ""
+					
+					sock_datadict[sockname] += tempdata
+			
+			except:
+				remolist.append(sockitem)
+	
+	for sockitem in remolist:
+		sockname = k[v.index(sockitem)]
+		sockremo(sockname)
+	
+	for dictkeyi in sock_datadict.keys():
+		if (dictkeyi in datalist):
+			if (sock_datadict[dictkeyi] != ""):
+				retndata = sock_datadict[dictkeyi]
+				sock_datadict[dictkeyi] = ""
+				
+				tuploutp = (retndata, dictkeyi)
+				break
+		
+		else:
+			try:
+				newlindx = sock_datadict[dictkeyi].index("\n")
+			
+			except:
+				newlindx = -1
+			
+			if (newlindx > -1):
+				retnstri = sock_datadict[dictkeyi][:newlindx]
+				newlindx += 1
+				sock_datadict[dictkeyi] = sock_datadict[dictkeyi][newlindx:]
+				
+				tuploutp = (retnstri, dictkeyi)
+				break
+	
+	return tuploutp
+
+def socksend(sockobjc, sockdata):
+	try:
+		sockobjc.send(sockdata)
+	
+	except:
+		return 0
+	
+	return 1
+
+def sockkeys():
+	global sock_objcdict
+	
+	return sock_objcdict.keys()
+
+def sockvals(sockstri):
+	global sock_objcdict
+	
+	if (sockstri in sock_objcdict.keys()):
+		return sock_objcdict[sockstri]
+	
+	return None
+
+def recvfile(datadict, valudata, namedata):
+	global tempfold
+	
+	if (datadict[namedata] == None):
+		datadict[namedata] = ["", None, None, None, 0]
+	
+	datadict[namedata][0] += valudata
+	
+	for x in range(1, 4):
+		if (datadict[namedata][x] == None):
+			try:
+				newlindx = datadict[namedata][0].index("\n")
+			
+			except:
+				newlindx = -1
+			
+			if (newlindx > 0):
+				datadict[namedata][x] = datadict[namedata][0][:newlindx].strip()
+				newlindx += 1
+				datadict[namedata][0] = datadict[namedata][0][newlindx:]
+				
+				if (x == 3):
+					datadict[namedata][1] = safefold(datadict[namedata][1])
+					datadict[namedata][2] = safenumb(datadict[namedata][2])
+					
+					filepath = (tempfold + "/" + datadict[namedata][1])
+					safemove("", filepath)
+					
+					print("[%s] recv [%s][%s][%s] sorc [%s]" % (formdate(), datadict[namedata][1], datadict[namedata][2], datadict[namedata][3], namedata))
+	
+	if (datadict[namedata][3] == None):
+		return datadict
+	
+	filepath = (tempfold + "/" + datadict[namedata][1])
+	filesize = safesize(filepath)
+	leftsize = (datadict[namedata][2] - filesize)
+	
+	if (leftsize > 0):
+		try:
+			fileobjc = open(filepath, "a")
+			fileobjc.write(datadict[namedata][0][:leftsize])
+			fileobjc.close()
+		
+		except:
+			print("[%s] erro writing file [%s]" % (formdate(), filepath))
+			
+			return datadict
+		
+		datadict[namedata][0] = datadict[namedata][0][leftsize:]
+	
+	filesize = safesize(filepath)
+	
+	if (filesize >= datadict[namedata][2]):
+		filehash = hashfile(filepath)
+		fileobjc = open(tempfold + "/" + namedata, "w")
+		
+		if (filehash == datadict[namedata][3]):
+			fileobjc.write("okay")
+			datadict[namedata][4] = 1
+		
+		else:
+			print("[%s] erro hashes do not match [%s]" % (formdate(), filepath))
+			
+			fileobjc.write("erro")
+			datadict[namedata][4] = 2
+		
+		fileobjc.close()
+	
+	return datadict
+
+def sendfile(namedata, foldpath, filerela):
+	sockobjc = sockvals(namedata)
+	filesize = safesize(foldpath + "/" + filerela)
+	filehash = hashfile(foldpath + "/" + filerela)
+	
+	print("[%s] send [%s/%s] dest [%s]" % (formdate(), foldpath, filerela, namedata))
+	
+	socksend(sockobjc, filerela + "\n")
+	socksend(sockobjc, str(filesize) + "\n")
+	socksend(sockobjc, filehash + "\n")
+	
+	try:
+		fileobjc = open(foldpath + "/" + filerela, "r")
+		
+		while (1):
+			filedata = fileobjc.read(2**15)
+			
+			if (not filedata):
+				break
+			
+			socksend(sockobjc, filedata)
+		
+		fileobjc.close()
+	
+	except:
+		pass
+
+def servfunc():
+	global portnumb
+	global versnumb
+	global password
+	global tempfold
+	
+	sorcfold = sys.argv[2]
+	workfold = sys.argv[3]
+	destfold = sys.argv[4]
+	repofold = sys.argv[5]
+	
+	if (len(sys.argv) > 6):
+		password = sys.argv[6]
+	
+	priofile = "priority.txt"
+	sockobjc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	proclist = []; filedict = {}; workdict = {}
+	
+	sockobjc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	sockobjc.bind(("", portnumb))
+	sockobjc.listen(1)
+	
+	while (1):
+		prestime = time.time()
+		datetime = time.strftime("%z/%d-%H:%M:%S")
+		
+		#print("[%s] checking for a new client connection" % (formdate()))
+		
+		(inptlist, outplist, errolist) = select.select([sockobjc], [], [], 0)
+		
+		if (sockobjc in inptlist):
+			(clieconn, clieaddr) = sockobjc.accept()
+			
+			cliename = str(clieaddr)
+			sockadds(clieconn, cliename)
+			workdict[cliename] = [False, None, "", prestime]
+			
+			print("[%s] conn [%s]" % (formdate(), cliename))
+		
+		#print("[%s] collect any exit statues of the finished child processes" % (formdate()))
+		
+		for procinum in proclist:
+			try:
+				os.waitpid(procinum, os.WNOHANG)
+			
+			except:
+				proclist.remove(procinum)
+		
+		#print("[%s] remove any disconnected clients and move any work files without-client to the source folder" % (formdate()))
+		
+		for namedata in workdict.keys():
+			if ((prestime - (5 * 60)) >= workdict[namedata][3]):
+				sockremo(namedata)
+			
+			if (namedata not in sockkeys()):
+				del workdict[namedata]
+		
+		for filename in safelist(workfold):
+			keysstri = ""
+			
+			for namedata in workdict.keys():
+				if (workdict[namedata][1] == filename):
+					keysstri = namedata
+			
+			if (keysstri == ""):
+				safemove(workfold + "/" + filename, sorcfold + "/" + filename, remoflag=False)
+		
+		#print("[%s] attempt to read any data from the clients" % (formdate()))
+		
+		tupldata = sockread(filedict.keys())
+		
+		if (tupldata != None):
+			(valudata, namedata) = tupldata
+			comdvalu = valudata.strip()
+			
+			if ((valudata != "") and (namedata not in filedict.keys())):
+				print("[%s] comd [%s] sorc [%s]" % (formdate(), comdvalu, namedata))
+			
+			if (namedata in filedict.keys()):
+				#print("[%s] process any raw client data first" % (formdate()))
+				
+				filedict = recvfile(filedict, valudata, namedata)
+				
+				if (filedict[namedata][4] == 1):
+					safemove(tempfold + "/" + filedict[namedata][1], repofold + "/" + filedict[namedata][1])
+					socksend(sockvals(namedata), "\nokay\n")
+					del filedict[namedata]
+				
+				elif (filedict[namedata][4] != 0):
+					print("[%s] deny [%s] sorc [%s]" % (formdate(), filedict[namedata][1], namedata))
+					socksend(sockvals(namedata), "\nerro\n")
+					del filedict[namedata]
+			
+			elif (comdvalu[:5] == "auth:"):
+				valulist = comdvalu[5:].split(" ")
+				
+				try:
+					if ((float(valulist[0].strip()) == versnumb) and (valulist[1].strip() == password)):
+						workdict[namedata][0] = True
+				
+				except:
+					pass
+			
+			elif (comdvalu == "stat"):
+				#print("[%s] provide server-side stats to a web user" % (formdate()))
+				
+				cpidnumb = safefork()
+				
+				if (cpidnumb == 0):
+					errolist = []; donelist = []
+					
+					for folditem in safelist(repofold):
+						if (re.match("^mock\..*$", folditem)):
+							findflag = 0
+							
+							for fileitem in safelist(repofold + "/" + folditem):
+								if (re.match("^.*\.src\.rpm$", fileitem)):
+									findflag = 1
+							
+							if (findflag == 0):
+								errolist.append(folditem)
+							
+							else:
+								donelist.append(folditem)
+					
+					errolist.sort(); donelist.sort()
+					
+					socksend(sockvals(namedata), "\nerro\n")
+					
+					for listitem in errolist:
+						socksend(sockvals(namedata), listitem + "\n")
+					
+					socksend(sockvals(namedata), "\ndone\n")
+					
+					for listitem in donelist:
+						socksend(sockvals(namedata), listitem + "\n")
+					
+					socksend(sockvals(namedata), "\nwork\n")
+					
+					templist = workdict.keys(); templist.sort()
+					
+					for workitem in templist:
+						if (not re.match("^.*'127\.0\.0\.1'.*$", workitem)):
+							socksend(sockvals(namedata), workitem + " [authed, jobs, start, ping] = " + str(workdict[workitem]) + "\n")
+					
+					socksend(sockvals(namedata), "\nprio\n")
+					
+					for listitem in readfile(sorcfold + "/" + priofile):
+						socksend(sockvals(namedata), listitem + "\n")
+					
+					socksend(sockvals(namedata), "\nsorc\n")
+					
+					for listitem in safelist(sorcfold):
+						socksend(sockvals(namedata), listitem + "\n")
+					
+					socksend(sockvals(namedata), "\n\1\n")
+					sys.exit(0)
+				
+				proclist.append(cpidnumb)
+			
+			elif (comdvalu[:5] == "logs:"):
+				#print("[%s] read a log file for a web user" % (formdate()))
+				
+				cpidnumb = safefork()
+				
+				if (cpidnumb == 0):
+					foldname = safefold(comdvalu[5:])
+					
+					for fileitem in safelist(repofold + "/" + foldname):
+						if (re.match("^.*\.log$", fileitem)):
+							socksend(sockvals(namedata), "---=== " + fileitem + " ===---" + "\n")
+							
+							for lineitem in readfile(repofold + "/" + foldname + "/" + fileitem):
+								lineitem = lineitem.replace("<", "&lt;")
+								socksend(sockvals(namedata), lineitem + "\n")
+							
+							socksend(sockvals(namedata), "---=== " + fileitem + " ===---" + "\n")
+					
+					socksend(sockvals(namedata), "\n\1\n")
+					sys.exit(0)
+				
+				proclist.append(cpidnumb)
+			
+			elif (workdict[namedata][0] != True):
+				pass
+			
+			elif (comdvalu[:5] == "name:"):
+				tempname = safefold(comdvalu[5:])
+				tempname = re.sub("\([^,]+,", "(" + tempname + ",", namedata)
+				
+				if (sockrepl(namedata, tempname) == 1):
+					workdict[tempname] = workdict[namedata]
+					del workdict[namedata]
+			
+			elif (comdvalu == "gets"):
+				#print("[%s] fork a child to send a pkg to the client" % (formdate()))
+				
+				fileitem = ""
+				workdict[namedata][1] = None
+				workdict[namedata][2] = ""
+				
+				pkgslist = safelist(sorcfold)
+				priolist = readfile(sorcfold + "/" + priofile)
+				
+				while (pkgslist.count(priofile) > 0):
+					pkgslist.remove(priofile)
+				
+				if (fileitem == ""):
+					for listitem in priolist:
+						if (listitem in pkgslist):
+							fileitem = listitem
+							break
+				
+				if (fileitem == ""):
+					if (len(pkgslist) > 0):
+						fileitem = random.choice(pkgslist)
+				
+				if (fileitem != ""):
+					safemove(sorcfold + "/" + fileitem, workfold + "/" + fileitem, remoflag=False)
+					cpidnumb = safefork()
+					
+					if (cpidnumb == 0):
+						sendfile(namedata, workfold, fileitem)
+						sys.exit(0)
+					
+					proclist.append(cpidnumb)
+					workdict[namedata][1] = fileitem
+					workdict[namedata][2] = datetime
+			
+			elif (comdvalu[:5] == "ping:"):
+				tempname = safefold(comdvalu[5:])
+				
+				if (tempname):
+					safemove(sorcfold + "/" + tempname, workfold + "/" + tempname, remoflag=False)
+					workdict[namedata][1] = tempname
+					workdict[namedata][3] = prestime
+			
+			elif (comdvalu == "sets"):
+				#print("[%s] keep track of which client is in raw data mode" % (formdate()))
+				
+				filedict[namedata] = None
+			
+			elif (comdvalu == "done"):
+				#print("[%s] client has finished with the given data" % (formdate()))
+				
+				if ((namedata in workdict.keys()) and (workdict[namedata][1] != None)):
+					pkgsstat = readfile(tempfold + "/" + namedata)
+					
+					if ((len(pkgsstat) > 0) and (pkgsstat[0] == "okay")):
+						safemove(workfold + "/" + workdict[namedata][1], destfold + "/" + workdict[namedata][1], remoflag=False)
+						safemove(sorcfold + "/" + workdict[namedata][1], destfold + "/" + workdict[namedata][1], remoflag=False)
+					
+					else:
+						safemove(workfold + "/" + workdict[namedata][1], sorcfold + "/" + workdict[namedata][1], remoflag=False)
+						safemove(destfold + "/" + workdict[namedata][1], sorcfold + "/" + workdict[namedata][1], remoflag=False)
+					
+					mockfold = mockname("", workdict[namedata][1])
+					saferemo(tempfold, mockfold + "/")
+					
+					try:
+						fileobjc = open(tempfold + "/" + namedata, "w")
+						fileobjc.write(namedata + "\n")
+						fileobjc.close()
+					
+					except:
+						pass
+					
+					safemove(tempfold + "/" + namedata, repofold + "/" + mockfold + "/" + "builder.txt")
+				
+				workdict[namedata][1] = None
+				workdict[namedata][2] = ""
+		
+		else:
+			time.sleep(0.25)
+
+def cliefunc():
+	global portnumb
+	global versnumb
+	global password
+	global tempfold
+	
+	global lockfile
+	
+	servname = sys.argv[2]
+	mockconf = sys.argv[3]
+	
+	if (len(sys.argv) > 4):
+		password = sys.argv[4]
+	
+	spkgstat = ["", 0, []]
+	getswait = [0, 1 * 60]; pingwait = [0, 1 * 60]
+	childpid = -1
+	sockobjc = None
+	filedict = {}
+	
+	while (1):
+		prestime = time.time()
+		pkgsfold = mockname("", spkgstat[0])
+		mockfold = (tempfold + "/" + pkgsfold)
+		
+		if (servname not in sockkeys()):
+			sockobjc = None
+		
+		#print("[%s] make a new socket connection if we dont have one" % (formdate()))
+		
+		if (sockobjc == None):
+			print("[%s] conn [%s] port [%d]" % (formdate(), servname, portnumb))
+			
+			sockobjc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			
+			try:
+				sockobjc.connect((servname, portnumb))
+				sockadds(sockobjc, servname)
+				
+				if (socksend(sockvals(servname), "\nauth:" + str(versnumb) + " " + password + "\n") != 1):
+					sockobjc = None
+				
+				if (socksend(sockvals(servname), "\nname:" + socket.gethostname() + "\n") != 1):
+					sockobjc = None
+			
+			except:
+				time.sleep(1 * 60)
+				continue
+		
+		#print("[%s] send dummy data to keep conn alive" % (formdate()))
+		
+		if ((prestime - pingwait[0]) > pingwait[1]):
+			if (socksend(sockvals(servname), "\nping:" + spkgstat[0] + "\n") != 1):
+				sockobjc = None
+			
+			pingwait[0] = prestime
+		
+		#print("[%s] check if a child build process exists" % (formdate()))
+		
+		if (childpid > 0):
+			try:
+				os.waitpid(childpid, os.WNOHANG)
+			
+			except:
+				childpid = -1
+		
+		#print("[%s] request a pkg from the server" % (formdate()))
+		
+		if ((spkgstat[0] == "") and ((prestime - getswait[0]) > getswait[1])):
+			if (os.path.exists(lockfile)):
+				print("[%s] lock file [%s] found, exiting now..." % (formdate(), lockfile))
+				sys.exit(0)
+			
+			print("[%s] comd [gets] dest [%s]" % (formdate(), servname))
+			
+			if (socksend(sockvals(servname), "\ngets\n") != 1):
+				sockobjc = None
+			
+			else:
+				filedict[servname] = None
+			
+			spkgstat[1] = 0
+			getswait[0] = prestime
+		
+		#print("[%s] if we have a pkg then start building it" % (formdate()))
+		
+		if ((spkgstat[0] != "") and (spkgstat[1] == 0)):
+			if (childpid < 1):
+				childpid = safefork()
+				
+				if (childpid == 0):
+					comdlist = ["/usr/bin/mock", "-vr", mockconf, "--resultdir=%s" % (mockfold), "%s/%s" % (tempfold, spkgstat[0])]
+					
+					try:
+						os.execvp(comdlist[0], comdlist)
+					
+					except:
+						pass
+					
+					os._exit(0)
+				
+				else:
+					print("[%s] proc created child with pid [%d]" % (formdate(), childpid))
+				
+				spkgstat[1] += 1
+		
+		#print("[%s] check to see if the build is done or not" % (formdate()))
+		
+		if ((spkgstat[0] != "") and (spkgstat[1] == 1)):
+			if (childpid < 1):
+				spkgstat[2] = safelist(mockfold)
+				spkgstat[1] += 1
+		
+		#print("[%s] send a result file to the server or finish if were all done" % (formdate()))
+		
+		if ((spkgstat[0] != "") and (spkgstat[1] == 2)):
+			if (len(spkgstat[2]) > 0):
+				fileitem = ("%s/%s" % (pkgsfold, spkgstat[2][0]))
+				
+				if (socksend(sockobjc, "\nsets\n") != 1):
+					sockobjc = None
+				
+				else:
+					sendfile(servname, tempfold, fileitem)
+				
+				spkgstat[1] += 1
+			
+			else:
+				if (socksend(sockobjc, "\ndone\n") != 1):
+					sockobjc = None
+				
+				safeexec("rm -fr '%s' '%s/%s'" % (mockfold, tempfold, spkgstat[0]))
+				spkgstat[0] = ""
+		
+		#print("[%s] read any server messages" % (formdate()))
+		
+		tupldata = sockread(filedict.keys())
+		
+		if (tupldata != None):
+			(valudata, namedata) = tupldata
+			getswait[0] = prestime
+			
+			if (servname in filedict.keys()):
+				filedict = recvfile(filedict, valudata, servname)
+				
+				if (filedict[servname][4] == 1):
+					spkgstat[0] = filedict[servname][1]
+					del filedict[servname]
+				
+				elif (filedict[servname][4] != 0):
+					print("[%s] file [%s] erro from [%s]" % (formdate(), filedict[servname][1], servname))
+					del filedict[servname]
+			
+			elif (valudata.strip() == "okay"):
+				if (len(spkgstat[2]) > 0):
+					spkgstat[2].pop(0)
+				
+				spkgstat[1] = 2
+			
+			elif (valudata.strip() == "erro"):
+				spkgstat[1] = 2
+		
+		else:
+			time.sleep(1)
+
+if (len(sys.argv) < 2):
+	print("Usage: %s {server,client,cgi-bin} [options]" % (sys.argv[0]))
+
+elif ((sys.argv[1] == "server") or (sys.argv[1] == "client")):
+	if (sys.argv[1] == "server"):
+		if (len(sys.argv) < 6):
+			print("Usage: %s %s </path/to/sorc> </path/to/work> </path/to/dest> </path/to/repo> [password]" % (sys.argv[0], sys.argv[1]))
+		
+		else:
+			servfunc()
+	
+	elif (sys.argv[1] == "client"):
+		if (len(sys.argv) < 4):
+			print("Usage: %s %s {host.domain,IPv4} <mock-config> [password]" % (sys.argv[0], sys.argv[1]))
+		
+		else:
+			cliefunc()
+
+elif (sys.argv[1] == "cgi-bin"):
+	hostname = "127.0.0.1"
+	itemtype = ""
+	formdata = cgi.FieldStorage()
+	sockobjc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	
+	sockobjc.connect((hostname, portnumb))
+	sockadds(sockobjc, hostname)
+	
+	print("content-type: text/html\r\n\r\n")
+	
+	if ("logs" in formdata):
+		socksend(sockobjc, "\nlogs" + ":" + formdata["logs"].value + "\n")
+		
+		while (1):
+			tupldata = sockread()
+			
+			if (tupldata != None):
+				(valudata, namedata) = tupldata
+				
+				if (valudata == "\1"):
+					break
+				
+				valudata = valudata.strip()
+				
+				print(valudata + "<br />")
+	
+	else:
+		print("<html>")
+		
+		print("""
+			<head>
+				<title>Moji Build System</title>
+				<style>
+					div
+					{
+						border: 1px dotted black;
+						height: 120px;
+						overflow: auto;
+					}
+					#logs
+					{
+						height: 240px;
+					}
+					table
+					{
+						width: 95%;
+					}
+				</style>
+				<script>
+					var xmldobjc;
+					function ajaxresp()
+					{
+						if (xmldobjc.readyState == 4)
+						{
+							if (xmldobjc.status == 200)
+							{
+								document.getElementById("logs").innerHTML = xmldobjc.responseText;
+							}
+						}
+					}
+					function proccomd(comdtype, comdvalu)
+					{
+						xmldobjc = new XMLHttpRequest();
+						xmldobjc.onreadystatechange = ajaxresp;
+						xmldobjc.open("GET", "?logs=" + comdvalu, true);
+						xmldobjc.send();
+					}
+					function bodyinit()
+					{
+						var x;
+						var l = document.getElementsByClassName("data");
+						var m = document.getElementsByClassName("head");
+						var n, o, p = new Array(l.length);
+						for (x = 0; x < l.length; ++x)
+						{
+							n = l[x].getElementsByTagName("a");
+							o = l[x].getElementsByTagName("span");
+							p[x] = (n.length + o.length);
+						}
+						for (x = 0; (x < m.length) && (x < p.length); ++x)
+						{
+							m[x].innerHTML += (" [" + p[x] + "] ");
+						}
+					}
+				</script>
+			</head>
+		""")
+		
+		print("<body onload=\"bodyinit();\">")
+		
+		print("<center><table>")
+		
+		print("<tr><td><b><span class=\"head\" id=\"logs.text\">logs</span></b><td></tr>")
+		print("<tr><td><div class=\"data\" id=\"logs\"></div></td></tr>")
+		
+		socksend(sockobjc, "\nstat\n")
+		
+		while (1):
+			tupldata = sockread()
+			
+			if (tupldata != None):
+				(valudata, namedata) = tupldata
+				
+				if (valudata == "\1"):
+					break
+				
+				valudata = valudata.strip()
+				
+				if (not valudata):
+					if (itemtype):
+						print("</div></td></tr>")
+					
+					itemtype = ""
+				
+				else:
+					if (not itemtype):
+						itemtype = valudata
+						
+						print("<tr><td><b><span class=\"head\" id=\"%s.text\">%s</span></b></td></tr>" % (itemtype, itemtype))
+						print("<tr><td><div class=\"data\" id=\"%s\">" % (itemtype))
+					
+					else:
+						if ((itemtype == "erro") or (itemtype == "done")):
+							print("<a href=\"javascript:proccomd('%s', '%s');\">%s</a><br />" % (itemtype, valudata, valudata))
+						
+						else:
+							print("<span>%s</span><br />" % (valudata))
+		
+		print("</table></center>")
+		
+		print("</body>")
+		
+		print("</html>")
