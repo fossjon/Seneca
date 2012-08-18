@@ -5,8 +5,7 @@ Summary:	Writes binary image files to any specified block device
 
 Group:		Applications/System
 License:	GPLv2+
-URL:		http://fedoraproject.org/wiki/Fedora_ARM_Installer
-Source0:	http://fossjon.fedorapeople.org/%{name}-%{version}.tar.gz
+Source0:	%{name}-%{version}.tar.gz
 
 BuildArch:	noarch
 BuildRequires:	desktop-file-utils

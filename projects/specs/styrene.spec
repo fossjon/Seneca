@@ -5,7 +5,7 @@ Summary:	Database-driven package development.
 
 Group:		Utilities
 License:	GPLv2+
-Source0:	styrene-%{version}.tar.gz
+Source0:	%{name}-%{version}.tar.gz
 BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 
 BuildRequires: python2-devel
@@ -33,5 +33,5 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/styrene
 
 %changelog
-* Mon Jul 4 2010 Jon Chiappetta <jonc_mailbox@yahoo.ca> 0.1
+* Mon Jul 4 2010 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 0.1-1
 - init release

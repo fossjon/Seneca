@@ -3,8 +3,6 @@
 # chkconfig: 35 90 12
 # description: Moji-client Start script
 #
-# Template taken from: http://www.cyberciti.biz/tips/linux-write-sys-v-init-script-to-start-stop-service.html
-#
 ### BEGIN INIT INFO
 # Provides: moji-client
 # Required-Start:
