@@ -1,25 +1,29 @@
-Name:		fedora-arm-installer
-Version:	1.0.0
-Release:	3%{?dist}
-Summary:	Writes binary image files to any specified block device
+Name:           fedora-arm-installer
+Version:        1.0.0
+Release:        3%{?dist}
+Summary:        Writes binary image files to any specified block device
 
-Group:		Applications/System
-License:	GPLv2+
-Source0:	%{name}-%{version}.tar.gz
+Group:          Applications/System
+License:        GPLv2+
+Source0:        %{name}-%{version}.tar.gz
 
-BuildArch:	noarch
-BuildRequires:	desktop-file-utils
-Requires:	python2
-Requires:	PyQt4
-Requires:	usermode
+BuildRequires:  desktop-file-utils
+Requires:       python2
+Requires:       PyQt4
+Requires:       usermode
+
+BuildArch:      noarch
+
 
 %description
 Allows one to first select a source image (local or remote). The image must be
 a binary file containing: [MBR + Partitions + File Systems + Data]. A 
 destination block device should then be selected for final installation.
 
+
 %prep
 %setup -q
+
 
 %build
 mkdir pam
@@ -60,6 +64,7 @@ X-Desktop-File-Install-Version=0.18
 Categories=System
 EOF
 
+
 %install
 install -d ${RPM_BUILD_ROOT}%{_sysconfdir}/pam.d
 install -pm 0644 pam/* ${RPM_BUILD_ROOT}%{_sysconfdir}/pam.d/
@@ -80,6 +85,7 @@ install -d ${RPM_BUILD_ROOT}%{_sbindir}
 install -pm 0755 exe/* ${RPM_BUILD_ROOT}%{_sbindir}/
 install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
+
 %files
 %doc docs/LICENSE
 
@@ -94,10 +100,11 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 %{_sbindir}/%{name}-helper
 %{_sbindir}/%{name}
 
+
 %changelog
 * Thu Aug 16 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.0-3
 - Added a comment regarding dd.exe output format and changed the default archive
-  + compression to assume .zip format
+  & compression to assume .zip format
 
 * Thu Mar 08 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.0-2
 - usr share data dir change + desktop file + pipe object cleanup + windows drive
