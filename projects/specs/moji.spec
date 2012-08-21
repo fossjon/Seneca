@@ -1,22 +1,24 @@
-Name:           moji-client
+Name:           moji
 Version:        0.2
 Release:        1%{?dist}
-Summary:        Mini client-side build script (for armv5tel F15 bringup)
+Summary:        Mini client-server build script (ex for armv5tel F15 bringup)
 
+Group:          Utilities
 License:        GPLv2+
 Source0:        %{name}-%{version}.tgz
 
-#BuildRequires:  
 Requires:       mock
-Requires:	coreutils
+Requires:       coreutils
 Requires(pre):  shadow-utils
 
-BuildArch:	noarch
+BuildArch:      noarch
+
 
 %description
 Moji is a mini client-server buildsystem originally created for the armv5tel
 Fedora 15 bringup effort. This package contains the client side script
 configured for use with that effort.
+
 
 %prep
 %setup -q
@@ -41,7 +43,6 @@ install -p *.cfg %{buildroot}/%{_sysconfdir}/mock/
 %{_initrddir}/*
 %{_sysconfdir}/mock/*
 %doc COPYING
-
 
 
 %pre
