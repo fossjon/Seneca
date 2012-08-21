@@ -5,8 +5,7 @@ Summary:	Uses OpenGL to display an initial loading splash screen
 
 Group:		Amusements/Graphics
 License:	GPLv2+
-URL:		http://fossjon.fedorapeople.org/%{name}-%{version}.tgz
-Source0:	http://fossjon.fedorapeople.org/%{name}-%{version}.tgz
+Source0:	%{name}-%{version}.tgz
 
 BuildRequires:  systemd-units
 BuildRequires:	raspberrypi-vc-libs
