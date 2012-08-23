@@ -1,6 +1,6 @@
 Name:		raspi-splash
 Version:	1.0
-Release:	10.rpfr17
+Release:	11.rpfr17
 Summary:	Uses OpenGL to display an initial loading splash screen
 
 Group:		Amusements/Graphics
@@ -56,7 +56,7 @@ DefaultDependencies=no
 Before=systemd-vconsole-setup.service
 
 [Service]
-ExecStart=/bin/raspi-splash-helper
+ExecStart=/bin/%{name}-helper
 Type=forking
 
 [Install]
@@ -67,14 +67,14 @@ cat <<EOF > %{name}-stop.service
 [Unit]
 Description=Stop Rasp Pi Boot Screen
 DefaultDependencies=no
-After=rc-local.service
+After=getty@tty1.service
 
 [Service]
 ExecStart=/bin/systemctl stop %{name}-start.service
 Type=oneshot
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=getty.target
 EOF
 
 echo "build"
@@ -94,10 +94,10 @@ install -d %{buildroot}/%{systemdl}
 install -m 644 -p *.service %{buildroot}/%{systemdl}/
 
 install -d %{buildroot}/%{systemde}/sysinit.target.wants
-install -d %{buildroot}/%{systemde}/multi-user.target.wants
+install -d %{buildroot}/%{systemde}/getty.target.wants
 
 ln -s %{systemdl}/%{name}-start.service %{buildroot}/%{systemde}/sysinit.target.wants/
-ln -s %{systemdl}/%{name}-stop.service %{buildroot}/%{systemde}/multi-user.target.wants/
+ln -s %{systemdl}/%{name}-stop.service %{buildroot}/%{systemde}/getty.target.wants/
 
 echo "install"
 
@@ -112,15 +112,18 @@ echo "install"
 
 %post
 cd %{_datadir}/%{name}
-tar -xzvf %{zlibz}.tar.gz
+tar -xzf %{zlibz}.tar.gz
 
 
 %preun
 cd %{_datadir}/%{name}
-rm -frv %{zlibz}
+rm -fr %{zlibz}
 
 
 %changelog
+* Thu Aug 23 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0-11
+- Modified the splash stop service file
+
 * Thu Aug 23 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0-10
 - Corrected the dist tag
 
