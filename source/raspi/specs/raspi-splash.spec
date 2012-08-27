@@ -1,6 +1,6 @@
 Name:		raspi-splash
 Version:	1.0
-Release:	11.rpfr17
+Release:	12.rpfr17
 Summary:	Uses OpenGL to display an initial loading splash screen
 
 Group:		Amusements/Graphics
@@ -41,13 +41,17 @@ make
 cd ..
 make
 
+
 tar -czvf %{zlibz}.tar.gz %{zlibz}
 rm -frv %{zlibz}
+
 
 cat <<EOF > %{name}-helper
 #!/bin/bash
 %{_bindir}/%{name} %{_datadir}/%{name}/data/logo %{_datadir}/%{name}/data/anim &
+%{_bindir}/%{name}-stop &
 EOF
+
 
 cat <<EOF > %{name}-start.service
 [Unit]
@@ -56,48 +60,48 @@ DefaultDependencies=no
 Before=systemd-vconsole-setup.service
 
 [Service]
-ExecStart=/bin/%{name}-helper
+ExecStart=%{_bindir}/%{name}-helper
 Type=forking
 
 [Install]
 WantedBy=sysinit.target
 EOF
 
-cat <<EOF > %{name}-stop.service
-[Unit]
-Description=Stop Rasp Pi Boot Screen
-DefaultDependencies=no
-After=getty@tty1.service
 
-[Service]
-ExecStart=/bin/systemctl stop %{name}-start.service
-Type=oneshot
-
-[Install]
-WantedBy=getty.target
+cat <<EOF > %{name}-stop
+#!/bin/bash
+while true
+do
+	proc=\`ps x | grep -E '(firstboot|login|Xorg)' | grep -v grep\`
+	if [ "\$proc" != "" ]
+	then
+		/bin/systemctl stop %{name}-start.service
+		break
+	fi
+	sleep 2
+done
 EOF
+
+
+mv splash.bin %{name}
 
 echo "build"
 
 
 %install
-install -d %{buildroot}/%{_datadir}/%{name}
 
+install -d %{buildroot}/%{_datadir}/%{name}
 mv data %{buildroot}/%{_datadir}/%{name}/
 mv %{zlibz}.tar.gz %{buildroot}/%{_datadir}/%{name}/
 
 install -d %{buildroot}/%{_bindir}
-install -m 755 -p splash.bin %{buildroot}/%{_bindir}/%{name}
-install -m 755 -p %{name}-helper %{buildroot}/%{_bindir}/
+install -m 755 -p %{name} %{name}-helper %{name}-stop %{buildroot}/%{_bindir}/
 
 install -d %{buildroot}/%{systemdl}
 install -m 644 -p *.service %{buildroot}/%{systemdl}/
 
 install -d %{buildroot}/%{systemde}/sysinit.target.wants
-install -d %{buildroot}/%{systemde}/getty.target.wants
-
 ln -s %{systemdl}/%{name}-start.service %{buildroot}/%{systemde}/sysinit.target.wants/
-ln -s %{systemdl}/%{name}-stop.service %{buildroot}/%{systemde}/getty.target.wants/
 
 echo "install"
 
@@ -121,6 +125,9 @@ rm -fr %{zlibz}
 
 
 %changelog
+* Sun Aug 26 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0-12
+- Fixed the stop script during multi & graphical modes
+
 * Thu Aug 23 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0-11
 - Modified the splash stop service file
 
