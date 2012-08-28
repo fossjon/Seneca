@@ -398,7 +398,7 @@ sub kojistat
 	my @tasklist;
 	my $lastchek = 0;
 	my $chektime = (4 * 60);
-	my $tasktime = (8 * 3600);
+	my $tasktime = (16 * 3600);
 	
 	foreach (@linelist)
 	{
@@ -455,7 +455,7 @@ sub kojistat
 	
 	if (($redystat != 1) && ($taskleng < 1))
 	{
-		return (2, "Host is not ready with no tasks!");
+		return (2, "Host is not ready with no tasks. Check the size of the mock folder!");
 	}
 	
 	foreach (@tasklist)
