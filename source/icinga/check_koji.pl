@@ -149,7 +149,9 @@ sub statfs
 		($bsize, $blocks, $bfree, $bavail, $files, $ffree, $namelen) = unpack("x8 L1 x4 L1 x4 L1 x4 L1 x4 L1 x4 L1", $buff);
 	}
 	
-	return (($bavail * 100) / $blocks);
+	my $perc = int(($bavail * 10000) / $blocks);
+	
+	return ($perc / 100);
 }
 
 sub kojiproc
@@ -557,7 +559,7 @@ sub main
 			
 			if ($dirsize < 10)
 			{
-				print("Directory [".$infolist[0]."] size is getting low [.".$dirsize."% free].".eol());
+				print("Directory [".$infolist[0]."] size is getting low [".$dirsize."% free].".eol());
 				exit(1);
 			}
 		}
