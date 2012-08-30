@@ -1,5 +1,5 @@
 Name:           fedora-arm-installer
-Version:        1.0.0
+Version:        1.0.2
 Release:        3%{?dist}
 Summary:        Writes binary image files to any specified block device
 
@@ -102,6 +102,9 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Thu Aug 30 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-3
+- Modified the way downloads & saves work
+
 * Thu Aug 16 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.0-3
 - Added a comment regarding dd.exe output format and changed the default archive
   & compression to assume .zip format
