@@ -26,8 +26,8 @@ except:
 	import urllib
 
 class linux:
-	def username(self):
-		return os.getlogin()
+	def usersdir(self):
+		return "/home"
 	
 	def byttostr(self, byteinpt):
 		outpstri = ""
@@ -42,7 +42,10 @@ class linux:
 				outpstri += "?"
 		return outpstri
 	
-	def fixspath(self, filepath):
+	def fixspath(self, filepath, pathendi=False):
+		if (pathendi):
+			filepath += "/"
+		
 		return filepath
 	
 	def execcomd(self, comdlist, pipelist=[], errredir=False):
@@ -122,8 +125,8 @@ class linux:
 		return outplist
 
 class windows:
-	def username(self):
-		return os.environ["USERNAME"]
+	def usersdir(self):
+		return "C:\\Users"
 	
 	def byttostr(self, byteinpt):
 		outpstri = ""
@@ -138,7 +141,10 @@ class windows:
 				outpstri += "?"
 		return outpstri
 	
-	def fixspath(self, filepath):
+	def fixspath(self, filepath, pathendi=False):
+		if (pathendi):
+			filepath += "\\"
+		
 		return filepath.replace("/", "\\")
 	
 	def execcomd(self, comdlist, pipelist=[], errredir=False):
@@ -397,16 +403,6 @@ def readfile(filename):
 	
 	return filedata.strip()
 
-def homefold(sdefault, filename):
-	unamestr = sharedobj["systemt"].username()
-	pathlist = ["/home/" + unamestr + "/Downloads/", "C:\\Documents and Settings\\" + unamestr + "\\Downloads\\", "C:\\Users\\" + unamestr + "\\Downloads\\"]
-	
-	for pathitem in pathlist:
-		if (os.path.exists(pathitem)):
-			return (pathitem + filename)
-	
-	return sdefault
-
 def xferfile(sorcobjc, sorcsize, destobjc, slogpref, slogfile, syncoptn, sendfins):
 	readnumb = 0
 	lasttime = 0
@@ -645,6 +641,8 @@ def bcontrol(msetting):
 	sharedobj["finbuttn"].setDisabled(not msetting)
 	
 	sharedobj["cancelbtn"].setDisabled(msetting)
+	
+	refrwins()
 
 def cancelit():
 	global sharedobj
@@ -682,6 +680,10 @@ def createpreb():
 		filelist = sharedobj["tempfile"][comdmode]
 		execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], sharedobj["localimg"], devsname])
 		sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
+		
+		return 0
+	
+	return 0
 
 def createprea():
 	global sharedobj
@@ -710,19 +712,30 @@ def createprea():
 		if (pipestat < 1):
 			random.shuffle(sharedobj["downlist"][downindx][1])
 			downitem = sharedobj["downlist"][downindx][1][0]
-			print("download:",downitem)
+			print(["Download:",downitem])
 			
 			preptemp(comdmode)
 			filelist = sharedobj["tempfile"][comdmode]
-			homefile = homefold(filelist[1], os.path.basename(downitem))
-			execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], downitem, homefile])
-			sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
 			
-			sharedobj["localimg"] = homefile
+			foldpath = str(QtGui.QFileDialog.getExistingDirectory(sharedobj["windowobj"], caption="Select Download Directory", directory=sharedobj["systemt"].usersdir()))
+			
+			if (foldpath):
+				foldpath = (sharedobj["systemt"].fixspath(foldpath, pathendi=True) + os.path.basename(downitem))
+				sharedobj["localimg"] = foldpath
+			else:
+				foldpath = ""
+				sharedobj["localimg"] = filelist[1]
+				
+				cancelit()
+				return -1
+			
+			execlist = sharedobj["systemt"].callself(sys.argv[0], [comdmode, filelist[0], filelist[1], downitem, foldpath])
+			sharedobj["pipeobjc"][comdmode] = sharedobj["systemt"].execcomd(execlist)
 		
 		return 0
 	
 	createpreb()
+	return 0
 
 def refrdown():
 	global sharedobj
@@ -881,12 +894,13 @@ def timercall():
 				if ((pipeitem == "r") and (filelist[0] == "f")):
 					if (prognumb == 100):
 						createpreb()
-						break
+						cleanups(pipekeyn=pipeitem)
+						return 0
 					else:
 						if (prognumb == 0):
 							QtGui.QMessageBox.warning(sharedobj["windowobj"], "Warning!", "Error while saving file! Try the install again.")
 						cancelit()
-						break
+						return -1
 				
 				if ((pipeitem == "i") and (filelist[0] == "f")):
 					if (prognumb == 100):
@@ -896,13 +910,13 @@ def timercall():
 						if (prognumb == 0):
 							QtGui.QMessageBox.warning(sharedobj["windowobj"], "Warning!", "Error during file install! Try the install again.")
 						cancelit()
-						break
+						return -1
 			
 			''' end: download, save, install file '''
 			
 			if (filelist[0] == "f"):
 				cleanups(pipekeyn=pipeitem)
-				break
+				return 0
 
 def main():
 	global sharedobj
@@ -1060,8 +1074,6 @@ def main():
 	
 	''' beg: post setup '''
 	
-	bcontrol(True)
-	
 	sharedobj["windowobj"].setWindowTitle("Fedora ARM Image Installer")
 	sharedobj["windowobj"].show()
 	
@@ -1069,7 +1081,7 @@ def main():
 	sharedobj["timerobj"].start(500)
 	
 	refrdest()
-	refrwins()
+	bcontrol(True)
 	
 	''' end: post setup '''
 	
@@ -1215,21 +1227,26 @@ if (__name__ == "__main__"):
 		except:
 			pass
 		
-		srcfobjc = open(sys.argv[3], "rb")
-		dstfobjc = open(sys.argv[5], "wb")
-		filesize = os.path.getsize(sys.argv[3])
+		if (sys.argv[5]):
+			srcfobjc = open(sys.argv[3], "rb")
+			dstfobjc = open(sys.argv[5], "wb")
+			filesize = os.path.getsize(sys.argv[3])
+			
+			xferfile(srcfobjc, filesize, dstfobjc, "Saving", sys.argv[2], False, True)
+			
+			try:
+				dstfobjc.close()
+			except:
+				pass
+			
+			try:
+				srcfobjc.close()
+			except:
+				pass
 		
-		xferfile(srcfobjc, filesize, dstfobjc, "Saving", sys.argv[2], False, True)
-		
-		try:
-			dstfobjc.close()
-		except:
-			pass
-		
-		try:
-			srcfobjc.close()
-		except:
-			pass
+		else:
+			outpfile(sys.argv[2], "f\1%d\2%s" % (-1, "Invalid download destination selected!"))
+			sys.exit(0)
 	
 	''' end: download & save file '''
 	
