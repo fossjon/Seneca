@@ -399,8 +399,8 @@ sub kojistat
 	my $redystat = 0;
 	my @tasklist;
 	my $lastchek = 0;
-	my $chektime = (4 * 60);
-	my $tasktime = (16 * 3600);
+	my $chektime = (10 * 60);
+	my $tasktime = (18 * 3600);
 	
 	foreach (@linelist)
 	{
@@ -466,13 +466,13 @@ sub kojistat
 		
 		if (($prestime - $tasktime) >= $taskitem[1])
 		{
-			return (1, "Task [".$rooturls."/koji/buildrootinfo?buildrootID=".$taskitem[0]."] has been running for over [".($tasktime / 3600)."] hours.");
+			return (1, "Task [".$rooturls."/koji/buildrootinfo?buildrootID=".$taskitem[0]."] has been running for [".int($taskitem[1] / 3600)."] hours.");
 		}
 	}
 	
 	if (($prestime - $chektime) >= $lastchek)
 	{
-		return (1, "Host has not checked in during the last [".($chektime / 60)."] minutes.");
+		return (1, "Host has not checked in during the last [".int($lastchek / 60)."] minutes.");
 	}
 	
 	return (0, $taskleng);
