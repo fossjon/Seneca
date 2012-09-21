@@ -460,19 +460,19 @@ sub kojistat
 		return (2, "Host is not ready with no tasks. Check the size of the mock folder!");
 	}
 	
+	if (($prestime - $lastchek) >= $chektime)
+	{
+		return (1, "Host has not checked in during the last [".int(($prestime - $lastchek) / 60)."] minutes.");
+	}
+	
 	foreach (@tasklist)
 	{
 		my @taskitem = @$_;
 		
-		if (($prestime - $tasktime) >= $taskitem[1])
+		if (($prestime - $taskitem[1]) >= $tasktime)
 		{
-			return (1, "Task [".$rooturls."/koji/buildrootinfo?buildrootID=".$taskitem[0]."] has been running for [".int($taskitem[1] / 3600)."] hours.");
+			return (1, "Task [".$rooturls."/koji/buildrootinfo?buildrootID=".$taskitem[0]."] has been running for [".int(($prestime - $taskitem[1]) / 3600)."] hours.");
 		}
-	}
-	
-	if (($prestime - $chektime) >= $lastchek)
-	{
-		return (1, "Host has not checked in during the last [".int($lastchek / 60)."] minutes.");
 	}
 	
 	return (0, $taskleng);
