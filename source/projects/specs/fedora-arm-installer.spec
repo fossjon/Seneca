@@ -1,14 +1,17 @@
 Name:           fedora-arm-installer
 Version:        1.0.2
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
 License:        GPLv2+
-Source0:        %{name}-%{version}.tar.gz
+Source0:        http://fossjon.fedorapeople.org/packages/fedora-arm-installer/%{name}-%{version}.tar.gz
+Source1:        %{name}.pam
+Source2:        %{name}.cfg
+Source3:        %{name}-helper
+Source4:        %{name}.desktop
 
 BuildRequires:  desktop-file-utils
-Requires:       python2
 Requires:       PyQt4
 Requires:       usermode
 
@@ -25,55 +28,15 @@ destination block device should then be selected for final installation.
 %setup -q
 
 
-%build
-mkdir pam
-cat > pam/%{name} <<EOF
-#%PAM-1.0
-auth		include		config-util
-account		include		config-util
-session		include		config-util
-EOF
-
-mkdir cfg
-cat > cfg/%{name} <<EOF
-PROGRAM=%{_sbindir}/%{name}-helper
-SESSION=true
-EOF
-
-mkdir exe
-cat > exe/%{name}-helper <<EOF
-#!/bin/bash
-export DBUS_SESSION_BUS_ADDRESS=needed
-export DESKTOP_SESSION=needed
-export GNOME_DESKTOP_SESSION_ID=needed
-exec %{_sbindir}/%{name}
-EOF
-
-mkdir dsk
-cat > dsk/%{name}.desktop <<EOF
-[Desktop Entry]
-Encoding=UTF-8
-Name=Fedora ARM Image Installer
-Comment=Install a Fedora ARM or Fedora Remix ARM image to an SD card
-Exec=fedora-arm-installer
-Terminal=false
-Type=Application
-Icon=/usr/share/%{name}/data/logo.png
-StartupNotify=true
-X-Desktop-File-Install-Version=0.18
-Categories=System
-EOF
-
-
 %install
 install -d ${RPM_BUILD_ROOT}%{_sysconfdir}/pam.d
-install -pm 0644 pam/* ${RPM_BUILD_ROOT}%{_sysconfdir}/pam.d/
+install -pm 0644 %{SOURCE1} ${RPM_BUILD_ROOT}%{_sysconfdir}/pam.d/%{name}
 
 install -d ${RPM_BUILD_ROOT}%{_sysconfdir}/security/console.apps
-install -pm 0644 cfg/* ${RPM_BUILD_ROOT}%{_sysconfdir}/security/console.apps/
+install -pm 0644 %{SOURCE2} ${RPM_BUILD_ROOT}%{_sysconfdir}/security/console.apps/%{name}
 
 install -d ${RPM_BUILD_ROOT}%{_datadir}/applications
-desktop-file-install --dir=${RPM_BUILD_ROOT}%{_datadir}/applications/ dsk/*
+desktop-file-install --dir=${RPM_BUILD_ROOT}%{_datadir}/applications/ %{SOURCE4}
 
 install -d ${RPM_BUILD_ROOT}%{_datadir}/%{name}/data
 install -pm 0644 data/* ${RPM_BUILD_ROOT}%{_datadir}/%{name}/data/
@@ -82,7 +45,7 @@ install -d ${RPM_BUILD_ROOT}%{_bindir}
 ln -s consolehelper ${RPM_BUILD_ROOT}%{_bindir}/%{name}
 
 install -d ${RPM_BUILD_ROOT}%{_sbindir}
-install -pm 0755 exe/* ${RPM_BUILD_ROOT}%{_sbindir}/
+install -pm 0755 %{SOURCE3} ${RPM_BUILD_ROOT}%{_sbindir}/
 install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
@@ -102,6 +65,9 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Tue Dec 11 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-4
+- Cleaned up the spec file script creation with the use of Source files
+
 * Thu Aug 30 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-3
 - Modified the way downloads & saves work
 
