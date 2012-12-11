@@ -5,6 +5,7 @@ Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
 License:        GPLv2+
+Url:            http://fedoraproject.org/wiki/Fedora_ARM_Installer
 Source0:        http://fossjon.fedorapeople.org/packages/fedora-arm-installer/%{name}-%{version}.tar.gz
 Source1:        %{name}.pam
 Source2:        %{name}.cfg
@@ -26,6 +27,10 @@ destination block device should then be selected for final installation.
 
 %prep
 %setup -q
+
+
+%build
+echo "skipping..."
 
 
 %install
