@@ -5,17 +5,20 @@ Summary:	Takes an ARM image file and finalizes it with device specific configura
 
 Group:		Utility
 License:	GPLv2+
-URL:		
-Source0:	
+URL:		http://fossjon.fedorapeople.org/source/fedora/livemedia-modifier/%{name}
+Source0:	%{name}
 
-BuildRequires:	
-Requires:	
+#BuildRequires:	python
+Requires:	python
+BuildArch:	noarch
+
 
 %description
-
+Performs some last minute customizations of ARM-based image files
+so that they are tailored for their specific device types. 
 
 %prep
-%setup -q
+echo "skipping prep..."
 
 
 %build
@@ -24,13 +27,15 @@ echo "skipping build..."
 
 %install
 rm -rf $RPM_BUILD_ROOT
-make install DESTDIR=$RPM_BUILD_ROOT
+mkdir -p $RPM_BUILD_ROOT/%{_bindir}
+install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_bindir}/
 
 
 %files
-%doc
-
+%{_bindir}/%{name}
 
 
 %changelog
+* Thu Jan 10 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.1-1
+- Initial packaging and release
 
