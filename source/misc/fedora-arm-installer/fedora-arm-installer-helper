@@ -1,0 +1,5 @@
+#!/bin/bash
+export DBUS_SESSION_BUS_ADDRESS=needed
+export DESKTOP_SESSION=needed
+export GNOME_DESKTOP_SESSION_ID=needed
+exec /usr/sbin/fedora-arm-installer
