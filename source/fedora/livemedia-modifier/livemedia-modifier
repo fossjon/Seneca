@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.1
-Date:     09/01/2013 (dd/mm/yyyy)
+Version:  1.2
+Date:     11/01/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox [at] yahoo [dot] ca)
 '''.strip()
 
@@ -412,7 +412,7 @@ def conf(opts):
 			filn = ("%s/etc/sysconfig/uboot" % (opts["root"][1]))
 			filo = open(filn, "a")
 			filo.write("UBOOT_DIR=/boot/uboot\n")
-			filo.write("UBOOT_DEVICE=mmcblk0p1\n")
+			filo.write("UBOOT_DEVICE=mmcblk0p%d\n" % (opts["boot"][0]))
 			filo.close()
 			print("Write :: [%s]" % (filn))
 		except:
@@ -457,8 +457,9 @@ else
   echo "You need to install qemu-system-arm to boot a versatile express image"
 fi'''
 		
-		dlst = [["","qemu-system-arm -machine vexpress-a9 -m 1024 -nographic -net nic -net user","-append \"console=ttyAMA0,115200n8 rw root=/dev/mmcblk0p2 rootwait physmap.enabled=0\""],
-		["+x","qemu-system-arm -machine vexpress-a9 -m 1024 -net nic -net user","-append \"rw root=/dev/mmcblk0p2 rootwait physmap.enabled=0\""]]
+		dlst = [	["","qemu-system-arm -machine vexpress-a9 -m 1024 -nographic -net nic -net user","-append \"console=ttyAMA0,115200n8 rw root=/dev/mmcblk0p%d rootwait physmap.enabled=0\"" % (opts["root"][0])],
+					["+x","qemu-system-arm -machine vexpress-a9 -m 1024 -net nic -net user","-append \"rw root=/dev/mmcblk0p%d rootwait physmap.enabled=0\"" % (opts["root"][0])]
+		]
 		
 		mdir(fold, "%s/boot" % (name), pref=opts["type"][2])
 		
