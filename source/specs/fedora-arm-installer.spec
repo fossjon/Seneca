@@ -1,6 +1,6 @@
 Name:           fedora-arm-installer
 Version:        1.0.2
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
@@ -61,7 +61,7 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 %{_sysconfdir}/security/console.apps/%{name}
 
 %{_datadir}/applications/%{name}.desktop
-%{_datadir}/%{name}/data/
+%{_datadir}/%{name}/
 
 %{_bindir}/%{name}
 
@@ -70,6 +70,9 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Mon Jan 14 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-5
+- Minor tweaks to the specfile files section and license info
+
 * Tue Dec 11 2012 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-4
 - Cleaned up the spec file script creation with the use of Source files
 

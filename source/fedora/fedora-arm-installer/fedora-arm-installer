@@ -1,10 +1,22 @@
 #!/usr/bin/python
+#
+# This file is part of fedora-arm-installer.  fedora-arm-installer is free software: you can
+# redistribute it and/or modify it under the terms of the GNU General Public
+# License as published by the Free Software Foundation, version 2.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# Copyright Jon Chiappetta
+#
 
-versnumb = "3"
+versnumb = "5"
 infotext = '''
-Date: 2012/08/30
+Date: 14/01/2013 (dd/mm/yyyy)
 Version: 1.0.2-''' + versnumb + '''
-Author: Jon Chiappetta
+Author: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''
 
 import hashlib
