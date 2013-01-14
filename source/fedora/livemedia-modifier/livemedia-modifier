@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.2
-Date:     11/01/2013 (dd/mm/yyyy)
+Version:  1.3
+Date:     14/01/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox [at] yahoo [dot] ca)
 '''.strip()
 
@@ -620,6 +620,10 @@ Modify a livemedia-creator image for specific platform requirements.
   --platform=PLATFORM   Platform to target {generic,kirkwood,omap,vexpress}.
   --nocompress          Modify the image without any final archival or compression (for vexpress).
 '''.strip()
+	
+	if (os.getuid() != 0):
+		print("Please run this script as the root user!")
+		sys.exit(1)
 	
 	try:
 		(opts, args) = getopt.getopt(sys.argv[1:], "hv", ["image=", "platform=", "nocompress", "help", "version"])
