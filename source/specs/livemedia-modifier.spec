@@ -1,5 +1,5 @@
 Name:		livemedia-modifier
-Version:	1.3
+Version:	1.4
 Release:	1%{?dist}
 Summary:	Takes an ARM image file and finalizes it with device specific configurations and modifications
 
@@ -36,6 +36,9 @@ install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_sbindir}/
 
 
 %changelog
+* Wed Jan 23 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.4-1
+- Fixed a small bug in creating a rootfs in lmm
+
 * Mon Jan 14 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.3-1
 - Added a check for root user execution and placed script in the sbin dir
 

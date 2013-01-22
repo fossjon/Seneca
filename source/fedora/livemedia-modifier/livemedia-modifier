@@ -1,9 +1,9 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.3
-Date:     14/01/2013 (dd/mm/yyyy)
-Name:     Jon Chiappetta (jonc_mailbox [at] yahoo [dot] ca)
+Version:  1.4
+Date:     23/01/2013 (dd/mm/yyyy)
+Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
 import getopt
@@ -510,36 +510,22 @@ fi'''
 				sys.exit(1)
 	
 	if (opts["type"][2] == ARMS["general"]):
-		# Delete any files related to the kernel package install
-		
-		try:
-			os.unlink(dirp)
-		except:
-			try:
-				shutil.rmtree(dirp)
-			except:
-				pass
-		
-		print("%s-Copy :: [%s] -> [%s]" % (opts["type"][2], opts["root"][1], dirp))
-		
-		try:
-			shutil.copytree(opts["root"][1], dirp, symlinks=True)
-		except:
-			print("Warning during copy [%s] !-> [%s]" % (opts["root"][1], dirp))
-		
-		for diri in ["%s/boot" % (dirp), "%s/lib/modules" % (dirp)]:
-			for fitm in os.listdir(diri):
-				pitm = ("%s/%s" % (diri, fitm))
-				
-				print("%s-Remove :: [%s]" % (opts["type"][2], pitm))
-				
-				try:
-					os.unlink(pitm)
-				except:
-					try:
-						shutil.rmtree(pitm)
-					except:
-						pass
+		if (opts["cmpr"][2] == "true"):
+			# Create a consolidated root fs archive
+			
+			tarb = ("%s.tar.xz" % (name))
+			
+			fold = opts["root"][1]
+			name = ""
+			
+			print("%s-Tar :: [%s] <- (-> [%s/]) [./%s]" % (opts["type"][2], tarb, fold, name))
+			
+			retn = subprocess.call(["/bin/tar", "-cJf", tarb, "-C", "%s/" % (fold), "--exclude=./boot/*", "--exclude=./lib/modules/*", "--exclude=./usr/lib/modules/*", "./%s" % (name)])
+			
+			if (retn != 0):
+				print("Error creating tarball file [%s]!" % (tarb))
+				disk(opts, "d")
+				sys.exit(1)
 
 '''
 	Perform any final configurations
@@ -570,27 +556,27 @@ def last(opts):
 			shutil.copyfile(srcf, dstf)
 		except:
 			print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
-	
-	if (opts["cmpr"][2] == "true"):
-		# Create the archive and remove the folder
 		
-		mdir(fold, name, pref=opts["type"][2])
-		tarb = ("%s.tar.xz" % (name))
-		
-		print("%s-Tar :: [%s] <- [%s]" % (opts["type"][2], tarb, dirp))
-		
-		retn = subprocess.call(["/bin/tar", "-cJf", tarb, "-C", "%s/" % (fold), "./%s" % (name)])
-		
-		if (retn != 0):
-			print("Error creating tarball file [%s]!" % (dirp))
-			sys.exit(1)
-		
-		print("%s-Remove :: [%s]" % (opts["type"][2], dirp))
-		
-		try:
-			shutil.rmtree(dirp)
-		except:
-			pass
+		if (opts["cmpr"][2] == "true"):
+			# Create a consolidated file archive and remove the folder
+			
+			mdir(fold, name, pref=opts["type"][2])
+			tarb = ("%s.tar.xz" % (name))
+			
+			print("%s-Tar :: [%s] <- (-> [%s/]) [./%s]" % (opts["type"][2], tarb, fold, name))
+			
+			retn = subprocess.call(["/bin/tar", "-cJf", tarb, "-C", "%s/" % (fold), "./%s" % (name)])
+			
+			if (retn != 0):
+				print("Error creating tarball file [%s]!" % (tarb))
+				sys.exit(1)
+			
+			print("%s-Remove :: [%s]" % (opts["type"][2], dirp))
+			
+			try:
+				shutil.rmtree(dirp)
+			except:
+				pass
 
 '''
 	Main method called during program execution
