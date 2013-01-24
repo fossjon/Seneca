@@ -303,13 +303,15 @@ def get_task(koji_obj, pkg_name):
 				src_item = {}
 				
 				for rpm_item in rpm_list:
-					rpm_item["rpm_url"] = ("packages/%s/%s/%s/%s/%s.%s.rpm" % (pkg_name, rpm_item["version"], rpm_item["release"], rpm_item["arch"], rpm_item["nvr"], rpm_item["arch"]))
 					if (rpm_item["arch"] == "src"):
 						src_item = rpm_item
 					elif (rpm_item["arch"] == "noarch"):
 						no_op = 1
 					else:
 						arch_flag = 1
+				
+				for rpm_item in rpm_list:
+					rpm_item["rpm_url"] = ("packages/%s/%s/%s/%s/%s.%s.rpm" % (src_item["name"], rpm_item["version"], rpm_item["release"], rpm_item["arch"], rpm_item["nvr"], rpm_item["arch"]))
 				
 				if (arch_flag == 0):
 					final_item = {"noarch":rpm_list}
