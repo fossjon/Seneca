@@ -52,9 +52,16 @@ def _unique_path(prefix):
 	Define some error ignoring methods
 '''
 
+def check_list(list_obj, pkg_name):
+	for list_item in list_obj:
+		if (list_item["srpm_name"] == pkg_name):
+			return 1
+	return 0
+
 def form_info(data_obj, simple_key):
 	out_obj = {}
 	for key_name in data_obj.keys():
+		out_obj[key_name] = data_obj[key_name]
 		if (key_name == simple_key):
 			out_obj[key_name] = data_obj[key_name][0]
 	return str(out_obj)
@@ -256,18 +263,23 @@ def map_cap(cap_list, db_name):
 '''
 
 def get_evr(pkg_name, db_name):
-	final_list = []
+	final_list = {}
 	
 	db_conn = sqlite3.connect(db_name)
 	db_curs = db_conn.cursor()
 	
 	try:
-		db_list = db_curs.execute("SELECT packages.epoch,packages.version,packages.release FROM packages WHERE packages.name = '%s';" % (pkg_name))
+		db_list = db_curs.execute("SELECT rpm_sourcerpm FROM packages WHERE location_href LIKE '%s/%%';" % (pkg_name))
 	except:
 		db_list = []
 	
 	for pkg_item in db_list:
-		final_list = [pkg_name, "EQ", str(pkg_item[0]), str(pkg_item[1]), str(pkg_item[2])]
+		(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
+		if (not rpm_epoch):
+			rpm_epoch = None
+		if (rpm_name == pkg_name):
+			final_list = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch}
+			final_list["nvr"] = ("%s-%s-%s" % (final_list["name"], final_list["version"], final_list["release"]))
 	
 	db_conn.close()
 	
@@ -277,7 +289,7 @@ def get_evr(pkg_name, db_name):
 	Get a list of package info and urls for a given package name
 '''
 
-def get_pkgs(pkg_name, pkg_epoch, pkg_vers, pkg_rels, db_name):
+def get_pkgs(pkg_name, db_name):
 	final_list = []
 	arch_flag = False
 	
@@ -296,8 +308,11 @@ def get_pkgs(pkg_name, pkg_epoch, pkg_vers, pkg_rels, db_name):
 		
 		if (len(final_list) < 1):
 			final_list.append({})
-			item_url = ("%s/%s/%s/%s/%s/%s" % (str(pkg_item[5]), pkg_name, pkg_vers, pkg_rels, "src", str(pkg_item[7])))
-			final_list[0] = {"name":pkg_name, "epoch":pkg_epoch, "version":pkg_vers, "release":pkg_rels, "arch":"src", "url":item_url}
+			(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[7]))
+			if (not rpm_epoch):
+				rpm_epoch = None
+			item_url = ("%s/%s/%s/%s/%s/%s" % (str(pkg_item[5]), pkg_name, rpm_vers, rpm_rels, rpm_arch, str(pkg_item[7])))
+			final_list[0] = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch, "url":item_url}
 			final_list[0]["nvr"] = ("%s-%s-%s" % (final_list[0]["name"], final_list[0]["version"], final_list[0]["release"]))
 		
 		if ((item_info["arch"] != "src") and (item_info["arch"] != "noarch")):
@@ -308,37 +323,6 @@ def get_pkgs(pkg_name, pkg_epoch, pkg_vers, pkg_rels, db_name):
 	db_conn.close()
 	
 	return (arch_flag, final_list)
-
-'''
-	Reorder and organize the que items into a hierarchical list based on dependencies
-'''
-
-def process_que(inpt_list):
-	que_tmp = inpt_list[:] ; name_list = []
-	for x in range(0, len(que_tmp)):
-		name_list.append(que_tmp[x]["srpm_name"])
-	
-	que_order = [] ; que_error = []
-	while (1):
-		tmp_list = []
-		for x in range(0, len(que_tmp)):
-			if ((que_tmp[x]) and (que_tmp[x]["que_state"]["state"] < 0)):
-				dep_flag = 0
-				for dep_name in que_tmp[x]["dep_list"]:
-					if (dep_name in name_list):
-						dep_flag = 1
-				if (dep_flag == 0):
-					tmp_list.append(que_tmp[x])
-					que_tmp[x] = None ; name_list[x] = None
-		if (len(tmp_list) < 1):
-			break
-		que_order.append(tmp_list)
-	
-	for que_item in que_tmp:
-		if (que_item):
-			que_error.append(que_item)
-	
-	return (que_order, que_error)
 
 '''
 	Get the latest build state for a given package nvr
@@ -374,6 +358,45 @@ def koji_state(pkg_nvr, koji_obj):
 	return build_info
 
 '''
+	Reorder and organize the que items into a hierarchical list based on dependencies
+'''
+
+def process_que(inpt_list):
+	for que_item in inpt_list:
+		tmp_list = []
+		for dep_name in que_item["dep_list"]:
+			if (check_list(inpt_list, dep_name) == 1):
+				tmp_list.append(dep_name)
+		que_item["dep_list"] = tmp_list
+	
+	name_list = []
+	for que_item in inpt_list:
+		name_list.append(que_item["srpm_name"])
+	
+	que_order = []
+	while (1):
+		tmp_list = []
+		for x in range(0, len(inpt_list)):
+			if (name_list[x]):
+				dep_flag = 0
+				for dep_name in inpt_list[x]["dep_list"]:
+					if (dep_name in name_list):
+						dep_flag = 1
+				if (dep_flag == 0):
+					tmp_list.append(inpt_list[x])
+					name_list[x] = None
+		if (len(tmp_list) < 1):
+			break
+		que_order.append(tmp_list)
+	
+	que_error = []
+	for x in range(0, len(inpt_list)):
+		if (name_list[x]):
+			que_error.append(inpt_list[x])
+	
+	return (que_order, que_error, inpt_list)
+
+'''
 	Parse thru the root.log file of a failed build and check for any package requires
 '''
 
@@ -394,21 +417,20 @@ def proc_error(info_obj, koji_obj):
 				continue
 			log_list = koji_obj.downloadTaskOutput(child_task["id"], "root.log")
 			
-			build_flag = 0 ; error_flag = 0
+			error_flag = 0
 			for log_line in log_list.split("\n"):
 				log_line = log_line.strip()
-				if ("'groupinstall', 'build'" in log_line):
-					build_flag = 8
-				if ((build_flag == 7) and ("Error: Package: " in log_line)):
-					error_flag = 8
-				if (((error_flag == 7) or (len(final_list) > 0)) and ("Requires: " in log_line)):
+				if ((error_flag == 1) and ("Requires: " in log_line)):
 					log_line = log_line.replace("<"," ").replace("["," ").replace("{"," ").replace("("," ")
 					log_line = log_line.replace(">"," ").replace("]"," ").replace("}"," ").replace(")"," ")
 					log_line = log_line.replace("="," ")
 					log_line = re.sub("^.*Requires: [ ]*", "", log_line)
 					log_line = re.sub(" .*$", "", log_line)
 					final_list.append(log_line)
-				build_flag -= 1 ; error_flag -= 1
+				elif ("Error: Package: " in log_line):
+					error_flag = 1
+				else:
+					error_flag = 0
 	
 	except:
 		pass
@@ -439,16 +461,6 @@ def que_build(target, que_obj, koji_obj):
 	except:
 		sys.stderr.write("\t" + "[error] build_upload" + "\n")
 	
-	return 0
-
-'''
-	Check a list of items for a specific package name
-'''
-
-def check_list(list_obj, pkg_name):
-	for list_item in list_obj:
-		if (list_item["srpm_name"] == pkg_name):
-			return 1
 	return 0
 
 '''
@@ -500,14 +512,16 @@ def main(args):
 		conf_opts = conf_file(sys.argv[1], {})
 		sys.stderr.write(str(conf_opts) + "\n\n")
 	except:
-		sys.stderr.write("Usage: %s </path/to/conf>" % (os.path.basename(sys.argv[0])))
+		sys.stderr.write("Usage: %s </path/to/conf>\n" % (os.path.basename(sys.argv[0])))
 		sys.exit(1)
 	
 	wait_time = (2 * 60)
 	que_list = []
 	dev_null = open("/dev/null", "r+")
 	
-	''' Start an infinite loop to monitor and check for changes '''
+	''' ********************************
+	    * Outer infinite checking loop *
+	    ******************************** '''
 	
 	while (1):
 		skip_flag = 0
@@ -569,10 +583,8 @@ def main(args):
 					add_flag = 1
 				
 				else:
+					primary_item = get_evr(primary_item["name"], primary_repo)
 					secondary_item = secondary_dic[primary_item["name"]]
-					
-					primary_evr = [primary_item["name"], "EQ", str(primary_item["epoch"]), primary_item["version"], primary_item["release"]]
-					secondary_evr = [secondary_item["name"], "EQ", str(secondary_item["epoch"]), secondary_item["version"], secondary_item["release"]]
 					
 					evr_alpha = (str(secondary_item["epoch"]), secondary_item["version"], secondary_item["release"])
 					evr_beta = (str(primary_item["epoch"]), primary_item["version"], primary_item["release"])
@@ -584,7 +596,7 @@ def main(args):
 					que_count = check_list(que_list, primary_item["name"])
 					
 					if (que_count == 0):
-						(arch_found, task_info) = get_pkgs(primary_item["name"], primary_item["epoch"], primary_item["version"], primary_item["release"], primary_repo)
+						(arch_found, task_info) = get_pkgs(primary_item["name"], primary_repo)
 						miss_item = {"dep_list":[], "cap_list":[], "srpm_name":primary_item["name"], "task_info":task_info}
 						
 						if (arch_found == True):
@@ -604,6 +616,8 @@ def main(args):
 									sys.stderr.write("\t" + "[error] package_excluded" + "\n")
 									noarch_flag = 1
 							
+							''' Download all of the noarch rpm files '''
+							
 							if (noarch_flag == 0):
 								for pkg_item in task_info:
 									rpm_file = os.path.basename(pkg_item["url"])
@@ -612,6 +626,8 @@ def main(args):
 										break
 									#check the integrity of the rpm file
 							
+							''' Login and authenticate to the Koji server '''
+							
 							if (noarch_flag == 0):
 								try:
 									secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
@@ -619,6 +635,8 @@ def main(args):
 								except:
 									sys.stderr.write("\t" + "[error] noarch_login" + "\n")
 									noarch_flag = 1
+							
+							''' Upload and import the related rpm files '''
 							
 							if (noarch_flag == 0):
 								for y in range(0, 2):
@@ -644,6 +662,8 @@ def main(args):
 										except:
 											sys.stderr.write("\t" + "[error] noarch_upload" + "\n")
 							
+							''' Tag the source rpm name '''
+							
 							if (noarch_flag == 0):
 								for pkg_item in task_info:
 									if (pkg_item["arch"] == "src"):
@@ -656,19 +676,22 @@ def main(args):
 		
 		#sys.exit(0)
 		
-		''' Loop thru the current list of out dated packages and analyze them '''
+		''' **********************************************
+		    * Inner processing loop for missing packages *
+		    ********************************************** '''
 		
 		x = 0
 		
 		while (x < len(miss_list)):
-			sys.stderr.write("[info]" + (" [%d/%d]" % (x + 1, len(miss_list))) + " processing: " + form_info(miss_list[x],"task_info") + "\n")
+			sys.stderr.write("[info] processing: " + ("[%d/%d] " % (x + 1, len(miss_list))) + form_info(miss_list[x],"task_info") + "\n")
 			
 			skip_flag = 0
 			task_info = miss_list[x]["task_info"]
 			
-			if (miss_list[x]["srpm_name"] in conf_opts["excl_list"]):
-				sys.stderr.write("\t" + "[error] package_excluded" + "\n")
-				skip_flag = 1
+			if (skip_flag == 0):
+				if (miss_list[x]["srpm_name"] in conf_opts["excl_list"]):
+					sys.stderr.write("\t" + "[error] package_excluded" + "\n")
+					skip_flag = 1
 			
 			''' *************************************************************************************************
 			    * Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
@@ -724,9 +747,7 @@ def main(args):
 				miss_list[x]["cap_list"] = []
 				
 				for req_item in req_list:
-					for miss_item in miss_list:
-						if (miss_item["srpm_name"] == req_item[0]):
-							miss_list[x]["dep_list"].append(req_item[0])
+					miss_list[x]["dep_list"].append(req_item[0])
 				
 				sys.stderr.write("\t" + "[info] dep_list: " + str(miss_list[x]["dep_list"]) + "\n")
 			
@@ -746,23 +767,25 @@ def main(args):
 		
 		#sys.exit(0)
 		
-		''' *********************************************************
-		    * Display and que the first level of processed packages *
-		    ********************************************************* '''
+		''' ****************************************************************
+		    * Inner que'ing loop for the first level of processed packages *
+		    **************************************************************** '''
 		
-		seen_list = [] ; update_list = []
+		seen_list = []
 		que_prio = {}
 		while (1):
-			(que_order, que_error) = process_que(que_list)
+			(que_order, que_error, que_list) = process_que(que_list)
 			conf_opts = conf_file(sys.argv[1], conf_opts)
 			
 			if (len(que_order) < 1):
 				break
 			
 			sys.stdout.write("\n")
-			sys.stdout.write("*************" + "\n")
-			sys.stdout.write("* Que Round *" + "\n")
-			sys.stdout.write("*************" + "\n\n")
+			sys.stdout.write("#############" + "\n")
+			sys.stdout.write("# Que Round #" + "\n")
+			sys.stdout.write("#############" + "\n\n")
+			
+			''' Login and authenticate to the Koji server '''
 			
 			try:
 				secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
@@ -772,11 +795,15 @@ def main(args):
 				time.sleep(wait_time)
 				continue
 			
+			''' Send any packages marked as a priority for build '''
+			
 			for prio_item in que_prio.keys():
-				if (not "sent_flag" in que_prio[prio_item]):
+				if (not "sent_flag" in que_prio[prio_item].keys()):
 					sys.stdout.write("que[p]: " + form_info(que_prio[prio_item],"task_info") + "\n")
 					que_build(conf_opts["tag_name"], que_prio[prio_item], secondary_obj)
 					que_prio[prio_item]["sent_flag"] = 1
+			
+			''' Get a count of our active tasks '''
 			
 			try:
 				secondary_tasks = secondary_obj.listTasks(opts={"state":[0,1], "method":"build"}, queryOpts={"limit":900})
@@ -788,6 +815,8 @@ def main(args):
 				sys.stderr.write("\t" + "[error] task_list/que_max: " + ("[%d/%d]" % (que_length, conf_opts["que_limit"])) + "\n")
 				time.sleep(wait_time)
 				continue
+			
+			''' Que any regular packages now '''
 			
 			que_level = 0
 			add_flag = 0
@@ -807,15 +836,12 @@ def main(args):
 			if (add_flag == 0):
 				break
 			
-			for seen_item in seen_list:
-				for que_item in que_list:
-					if ((que_item["srpm_name"] == seen_item) and (not seen_item in update_list)):
-						que_item["que_state"] = koji_state(que_item["task_info"][0]["nvr"], secondary_obj)
-						update_list.append(seen_item)
+			''' Update the build states of the qued packages '''
 			
 			for seen_item in seen_list:
 				for que_item in que_list:
 					if (que_item["srpm_name"] == seen_item):
+						que_item["que_state"] = koji_state(que_item["task_info"][0]["nvr"], secondary_obj)
 						req_list = proc_error(que_item["que_state"], secondary_obj)
 						for req_name in req_list:
 							for que_temp in que_list:
@@ -826,9 +852,7 @@ def main(args):
 			
 			time.sleep(wait_time)
 		
-		''' ********************************************************
-		    * Delete any uneeded files and sleep for the next loop *
-		    ******************************************************** '''
+		''' End of infinite outer loop '''
 		
 		#sys.exit(0)
 		
