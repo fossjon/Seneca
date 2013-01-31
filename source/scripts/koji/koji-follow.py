@@ -2,7 +2,7 @@
 
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 # Version: 1.0
-# Date: 28/01/2013 (dd/mm/yyyy)
+# Date: 30/01/2013 (dd/mm/yyyy)
 #
 # Execution notes (*you must*):
 #
@@ -499,6 +499,8 @@ def last_root(koji_tag, koji_url, pkg_item):
 				child_list = []
 			for child_item in child_list:
 				for arch_item in [child_item["arch"], child_item["label"]]:
+					if ((arch_item == "srpm") or (arch_item == "noarch") or (arch_item == "tag")):
+						continue
 					last_rels = []
 					yum_flag = 0
 					try:
@@ -610,7 +612,7 @@ def main(args):
 	while (1):
 		skip_flag = 0
 		primary_repo = ""
-		miss_list = []
+		miss_list = [] ; seen_list = []
 		conf_opts = conf_file(sys.argv[1], conf_opts)
 		
 		#list all of the files in the pwd and delete them
