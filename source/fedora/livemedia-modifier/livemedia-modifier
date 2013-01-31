@@ -447,10 +447,10 @@ def conf(opts):
 			# Copy out the needed vexpress shell boot scripts
 			
 			for fitm in flst:
-				for regx in ["vexpress.*"]:
+				for regx in ["boot-vexpress.*"]:
 					if (re.match("^%s$" % (regx), fitm, re.I)):
 						srcf = ("%s/%s" % (srcp, fitm))
-						dstf = ("%s/boot/boot-%s" % (dirp, fitm))
+						dstf = ("%s/boot/%s" % (dirp, fitm))
 						
 						print("%s-Copy :: [%s] -> [%s]" % (opts["type"][2], srcf, dstf))
 						

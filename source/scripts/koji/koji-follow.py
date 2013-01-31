@@ -275,11 +275,12 @@ def get_evr(pkg_name, db_name):
 	
 	for pkg_item in db_list:
 		(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
+		if (rpm_name != pkg_name):
+			continue
 		if (not rpm_epoch):
 			rpm_epoch = None
-		if (rpm_name == pkg_name):
-			final_list = {"epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch}
-			final_list["nvr"] = ("%s-%s-%s" % (pkg_name, final_list["version"], final_list["release"]))
+		final_list = {"epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch}
+		final_list["nvr"] = ("%s-%s-%s" % (pkg_name, final_list["version"], final_list["release"]))
 	
 	db_conn.close()
 	
@@ -299,37 +300,35 @@ def get_pkgs(pkg_name, db_name):
 	db_curs = db_conn.cursor()
 	
 	try:
-		db_list = db_curs.execute("SELECT name,epoch,version,release,arch,location_base,location_href,rpm_sourcerpm FROM packages WHERE location_href LIKE '%%%s/%%';" % (pkg_name))
+		db_list = db_curs.execute("SELECT rpm_sourcerpm,name,epoch,version,release,arch,location_base,location_href FROM packages WHERE location_href LIKE '%%%s/%%';" % (pkg_name))
 	except:
 		db_list = []
 	
 	for pkg_item in db_list:
-		url_pref = ""
-		safe_name = re.sub("([^0-9A-Za-z])", "\\\\\\1", pkg_name)
-		regx_beg = re.match("^%s/.*$" % (safe_name), str(pkg_item[6]))
-		regx_pre = re.match("^([^/]+)/%s/.*$" % (safe_name), str(pkg_item[6]))
-		if ((not regx_beg) and (not regx_pre)):
+		(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
+		if (rpm_name != pkg_name):
 			continue
-		if (regx_pre):
-			url_pref = regx_pre.group(1)
-		
-		item_url = ("%s/%s" % (str(pkg_item[5]), str(pkg_item[6])))
-		item_info = {"name":str(pkg_item[0]), "epoch":str(pkg_item[1]), "version":str(pkg_item[2]), "release":str(pkg_item[3]), "arch":str(pkg_item[4]), "url":item_url}
-		item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
+		if (not rpm_epoch):
+			rpm_epoch = None
 		
 		if (len(final_list) < 1):
-			final_list.append({})
-			(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[7]))
-			if (not rpm_epoch):
-				rpm_epoch = None
-			item_url = ("%s/%s/%s/%s/%s/%s/%s" % (str(pkg_item[5]), url_pref, pkg_name, rpm_vers, rpm_rels, rpm_arch, str(pkg_item[7])))
-			final_list[0] = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch, "url":item_url}
-			final_list[0]["nvr"] = ("%s-%s-%s" % (final_list[0]["name"], final_list[0]["version"], final_list[0]["release"]))
+			pref_list = []
+			for url_item in str(pkg_item[7]).split("/"):
+				if (url_item == pkg_name):
+					break
+				pref_list.append(url_item)
+			item_url = ("%s/%s/%s/%s/%s/%s/%s" % (str(pkg_item[6]), "/".join(pref_list), pkg_name, rpm_vers, rpm_rels, rpm_arch, str(pkg_item[0])))
+			item_info = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch, "url":item_url}
+			item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
+			final_list.append(item_info)
+		
+		item_url = ("%s/%s" % (str(pkg_item[6]), str(pkg_item[7])))
+		item_info = {"name":str(pkg_item[1]), "epoch":str(pkg_item[2]), "version":str(pkg_item[3]), "release":str(pkg_item[4]), "arch":str(pkg_item[5]), "url":item_url}
+		item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
+		final_list.append(item_info)
 		
 		if ((item_info["arch"] != "src") and (item_info["arch"] != "noarch")):
 			arch_flag = True
-		
-		final_list.append(item_info)
 	
 	db_conn.close()
 	
@@ -455,8 +454,6 @@ def proc_error(info_obj, koji_obj):
 '''
 
 def last_root(koji_tag, koji_url, pkg_item):
-	last_rels = []
-	
 	try:
 		koji_obj = koji.ClientSession("%s/kojihub" % (koji_url))
 		search_list = koji_obj.search(pkg_item["srpm_name"], "package", "glob")
@@ -502,6 +499,7 @@ def last_root(koji_tag, koji_url, pkg_item):
 				child_list = []
 			for child_item in child_list:
 				for arch_item in [child_item["arch"], child_item["label"]]:
+					last_rels = []
 					yum_flag = 0
 					try:
 						log_list = urllib.urlopen("%s/%s/%s/root.log" % (koji_url, log_path, arch_item)).readlines()
@@ -511,16 +509,15 @@ def last_root(koji_tag, koji_url, pkg_item):
 						log_line = log_line.replace("\t"," ").strip()
 						if (yum_flag == 1):
 							for dep_name in pkg_item["dep_list"]:
-								regx_obj = re.match("^.*%s[ ]+[^ ]+[ ]+([^ ]+)\.fc%d.*$" % (dep_name, prev_tag), log_line)
-								if ((regx_obj) and (not dep_name in last_rels)):
+								regx_obj = re.match("^.* ([^ ]+)[ ]+[^ ]+[ ]+[^ ]+\.fc%d .*$" % (prev_tag), log_line)
+								if ((regx_obj) and (regx_obj.group(1) == dep_name) and (not dep_name in last_rels)):
 									last_rels.append(dep_name)
 						if (re.match("^.*package[ ]+arch[ ]+version.*$", log_line, re.I)):
 							yum_flag = 1
 						if (re.match("^.*transaction[ ]+summary.*$", log_line, re.I)):
 							yum_flag = 0
-	
-	if (len(last_rels) == len(pkg_item["dep_list"])):
-		return True
+					if (len(last_rels) == len(pkg_item["dep_list"])):
+						return True
 	
 	return False
 
