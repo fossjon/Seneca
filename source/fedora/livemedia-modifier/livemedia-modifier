@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.4
-Date:     23/01/2013 (dd/mm/yyyy)
+Version:  1.5
+Date:     30/01/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -358,7 +358,7 @@ def conf(opts):
 	
 	dirp = ("%s/%s" % (fold, name))
 	
-	if ((opts["type"][2] == ARMS["guru"]) or (opts["type"][2] == ARMS["panda"])):
+	if (opts["type"][2] == ARMS["panda"]):
 		# Fix the fstab file with the new partition UUID
 		
 		uuid = ""
@@ -421,55 +421,15 @@ def conf(opts):
 			sys.exit(1)
 	
 	if (opts["type"][2] == ARMS["any"]):
-		# Define the main vexpress boot script
-		
-		data = '''#!/bin/sh
-
-KERN="$1"
-RAMFS="$2"
-IMAGE="$3"
-
-if [ X$RAMFS = X ]; then
-  echo "Usage: $0 kernel initramfs image"
-  exit 1
-fi
-
-if [ ! -f "$KERN" ]; then
-  echo "$KERN not found"
-  exit 1
-fi
-if [ ! -f "$RAMFS" ]; then
-  echo "$RAMFS not found"
-  exit 1
-fi
-if [ ! -f "$IMAGE" ]; then
-  echo "$IMAGE not found"
-  exit 1
-fi
-
-if [ -f /usr/bin/qemu-system-arm ]; then
-  %s \\
-    %s \\
-    -kernel "$KERN" \\
-    -initrd "$RAMFS" \\
-    -sd "$IMAGE"
-else
-  echo "You need to install qemu-system-arm to boot a versatile express image"
-fi'''
-		
-		dlst = [	["","qemu-system-arm -machine vexpress-a9 -m 1024 -nographic -net nic -net user","-append \"console=ttyAMA0,115200n8 rw root=/dev/mmcblk0p%d rootwait physmap.enabled=0\"" % (opts["root"][0])],
-					["+x","qemu-system-arm -machine vexpress-a9 -m 1024 -net nic -net user","-append \"rw root=/dev/mmcblk0p%d rootwait physmap.enabled=0\"" % (opts["root"][0])]
-		]
-		
 		mdir(fold, "%s/boot" % (name), pref=opts["type"][2])
-		
-		# Copy out common boot files for the archive
 		
 		for srcp in ["%s" % (opts["boot"][1]), "%s/boot" % (opts["root"][1])]:
 			try:
 				flst = os.listdir(srcp)
 			except:
 				flst = []
+			
+			# Copy out common boot files for the archive
 			
 			for fitm in flst:
 				for regx in ["initramfs-.*", "vmlinuz-.*"]:
@@ -483,31 +443,30 @@ fi'''
 							shutil.copyfile(srcf, dstf)
 						except:
 							print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
-		
-		# Create the needed vexpress shell scripts
-		
-		for item in dlst:
-			dstf = ("%s/boot/boot-vexpress%s" % (dirp, item[0]))
 			
-			print("%s-Write :: [%s]" % (opts["type"][2], dstf))
+			# Copy out the needed vexpress shell boot scripts
 			
-			try:
-				fobj = open(dstf, "w")
-				fobj.write(data % (item[1], item[2]))
-				fobj.close()
-			except:
-				print("Error writing to file [%s]!" % (dstf))
-				disk(opts, "d")
-				sys.exit(1)
-			
-			print("%s-Chmod :: [%s]" % (opts["type"][2], dstf))
-			
-			retn = subprocess.call(["/bin/chmod", "755", dstf])
-			
-			if (retn != 0):
-				print("Error changing permissions on file [%s]!" % (dstf))
-				disk(opts, "d")
-				sys.exit(1)
+			for fitm in flst:
+				for regx in ["vexpress.*"]:
+					if (re.match("^%s$" % (regx), fitm, re.I)):
+						srcf = ("%s/%s" % (srcp, fitm))
+						dstf = ("%s/boot/boot-%s" % (dirp, fitm))
+						
+						print("%s-Copy :: [%s] -> [%s]" % (opts["type"][2], srcf, dstf))
+						
+						try:
+							shutil.copyfile(srcf, dstf)
+						except:
+							print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
+						
+						print("%s-Chmod :: [%s]" % (opts["type"][2], dstf))
+						
+						retn = subprocess.call(["/bin/chmod", "755", dstf])
+						
+						if (retn != 0):
+							print("Error changing permissions on file [%s]!" % (dstf))
+							disk(opts, "d")
+							sys.exit(1)
 	
 	if (opts["type"][2] == ARMS["general"]):
 		if (opts["cmpr"][2] == "true"):

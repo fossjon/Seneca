@@ -269,7 +269,7 @@ def get_evr(pkg_name, db_name):
 	db_curs = db_conn.cursor()
 	
 	try:
-		db_list = db_curs.execute("SELECT rpm_sourcerpm FROM packages WHERE location_href LIKE '%s/%%';" % (pkg_name))
+		db_list = db_curs.execute("SELECT rpm_sourcerpm FROM packages WHERE location_href LIKE '%%%s/%%';" % (pkg_name))
 	except:
 		db_list = []
 	
@@ -278,10 +278,12 @@ def get_evr(pkg_name, db_name):
 		if (not rpm_epoch):
 			rpm_epoch = None
 		if (rpm_name == pkg_name):
-			final_list = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch}
-			final_list["nvr"] = ("%s-%s-%s" % (final_list["name"], final_list["version"], final_list["release"]))
+			final_list = {"epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch}
+			final_list["nvr"] = ("%s-%s-%s" % (pkg_name, final_list["version"], final_list["release"]))
 	
 	db_conn.close()
+	
+	final_list["name"] = pkg_name
 	
 	return final_list
 
@@ -297,11 +299,20 @@ def get_pkgs(pkg_name, db_name):
 	db_curs = db_conn.cursor()
 	
 	try:
-		db_list = db_curs.execute("SELECT name,epoch,version,release,arch,location_base,location_href,rpm_sourcerpm FROM packages WHERE location_href LIKE '%s/%%';" % (pkg_name))
+		db_list = db_curs.execute("SELECT name,epoch,version,release,arch,location_base,location_href,rpm_sourcerpm FROM packages WHERE location_href LIKE '%%%s/%%';" % (pkg_name))
 	except:
 		db_list = []
 	
 	for pkg_item in db_list:
+		url_pref = ""
+		safe_name = re.sub("([^0-9A-Za-z])", "\\\\\\1", pkg_name)
+		regx_beg = re.match("^%s/.*$" % (safe_name), str(pkg_item[6]))
+		regx_pre = re.match("^([^/]+)/%s/.*$" % (safe_name), str(pkg_item[6]))
+		if ((not regx_beg) and (not regx_pre)):
+			continue
+		if (regx_pre):
+			url_pref = regx_pre.group(1)
+		
 		item_url = ("%s/%s" % (str(pkg_item[5]), str(pkg_item[6])))
 		item_info = {"name":str(pkg_item[0]), "epoch":str(pkg_item[1]), "version":str(pkg_item[2]), "release":str(pkg_item[3]), "arch":str(pkg_item[4]), "url":item_url}
 		item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
@@ -311,7 +322,7 @@ def get_pkgs(pkg_name, db_name):
 			(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[7]))
 			if (not rpm_epoch):
 				rpm_epoch = None
-			item_url = ("%s/%s/%s/%s/%s/%s" % (str(pkg_item[5]), pkg_name, rpm_vers, rpm_rels, rpm_arch, str(pkg_item[7])))
+			item_url = ("%s/%s/%s/%s/%s/%s/%s" % (str(pkg_item[5]), url_pref, pkg_name, rpm_vers, rpm_rels, rpm_arch, str(pkg_item[7])))
 			final_list[0] = {"name":pkg_name, "epoch":rpm_epoch, "version":rpm_vers, "release":rpm_rels, "arch":rpm_arch, "url":item_url}
 			final_list[0]["nvr"] = ("%s-%s-%s" % (final_list[0]["name"], final_list[0]["version"], final_list[0]["release"]))
 		
@@ -426,7 +437,9 @@ def proc_error(info_obj, koji_obj):
 					log_line = log_line.replace("="," ")
 					log_line = re.sub("^.*Requires: [ ]*", "", log_line)
 					log_line = re.sub(" .*$", "", log_line)
-					final_list.append(log_line)
+					if ((log_line) and (not log_line in final_list)):
+						final_list.append(log_line)
+					error_flag = 2
 				elif ("Error: Package: " in log_line):
 					error_flag = 1
 				else:
@@ -436,6 +449,80 @@ def proc_error(info_obj, koji_obj):
 		pass
 	
 	return final_list
+
+'''
+	Attempt to find the original build root environment and the release version of the deps installed
+'''
+
+def last_root(koji_tag, koji_url, pkg_item):
+	last_rels = []
+	
+	try:
+		koji_obj = koji.ClientSession("%s/kojihub" % (koji_url))
+		search_list = koji_obj.search(pkg_item["srpm_name"], "package", "glob")
+	except:
+		search_list = []
+	
+	if (len(search_list) == 1):
+		last_build = None
+		tag_numb = re.sub("[^0-9]", "", koji_tag)
+		try:
+			build_list = koji_obj.listBuilds(packageID=search_list[0]["id"])
+		except:
+			build_list = []
+		for build_item in build_list:
+			if (build_item["state"] != 1):
+				continue
+			rels_list = build_item["release"].split(".")
+			while (len(rels_list) > 1):
+				rels_list.pop(0)
+			if (len(rels_list) > 0):
+				rels_list[0] = re.sub("[^0-9]", "", rels_list[0])
+				if (rels_list[0] == tag_numb):
+					if (not last_build):
+						last_build = build_item
+					elif (build_item["creation_ts"] < last_build["creation_ts"]):
+						last_build = build_item
+		
+		if (last_build):
+			try:
+				log_path = koji.pathinfo.build_logs(last_build)
+			except:
+				log_path = ""
+			log_path = log_path.strip("/").split("/")
+			if (len(log_path) > 2):
+				log_path.pop(0) ; log_path.pop(0)
+			log_path = "/".join(log_path)
+			
+			prev_tag = (int(tag_numb) - 1)
+			
+			try:
+				child_list = koji_obj.getTaskChildren(last_build["task_id"])
+			except:
+				child_list = []
+			for child_item in child_list:
+				for arch_item in [child_item["arch"], child_item["label"]]:
+					yum_flag = 0
+					try:
+						log_list = urllib.urlopen("%s/%s/%s/root.log" % (koji_url, log_path, arch_item)).readlines()
+					except:
+						log_list = []
+					for log_line in log_list:
+						log_line = log_line.replace("\t"," ").strip()
+						if (yum_flag == 1):
+							for dep_name in pkg_item["dep_list"]:
+								regx_obj = re.match("^.*%s[ ]+[^ ]+[ ]+([^ ]+)\.fc%d.*$" % (dep_name, prev_tag), log_line)
+								if ((regx_obj) and (not dep_name in last_rels)):
+									last_rels.append(dep_name)
+						if (re.match("^.*package[ ]+arch[ ]+version.*$", log_line, re.I)):
+							yum_flag = 1
+						if (re.match("^.*transaction[ ]+summary.*$", log_line, re.I)):
+							yum_flag = 0
+	
+	if (len(last_rels) == len(pkg_item["dep_list"])):
+		return True
+	
+	return False
 
 '''
 	Que a package to be built
@@ -516,7 +603,7 @@ def main(args):
 		sys.exit(1)
 	
 	wait_time = (2 * 60)
-	que_list = []
+	que_list = [] ; seen_list = []
 	dev_null = open("/dev/null", "r+")
 	
 	''' ********************************
@@ -566,16 +653,22 @@ def main(args):
 		if (skip_flag == 0):
 			sys.stderr.write("[info] latest_tagged: " + conf_opts["tag_name"] + "\n")
 			
-			primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
-			primary_tags = primary_obj.listTagged(conf_opts["tag_name"], inherit=False, latest=True)
+			try:
+				primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
+				primary_tags = primary_obj.listTagged(conf_opts["tag_name"], inherit=False, latest=True)
+				
+				secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
+				secondary_tags = secondary_obj.listTagged(conf_opts["tag_name"], inherit=False, latest=True)
+				
+				secondary_dic = {}
+				for secondary_item in secondary_tags:
+					secondary_dic[secondary_item["name"]] = secondary_item
 			
-			secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
-			secondary_tags = secondary_obj.listTagged(conf_opts["tag_name"], inherit=False, latest=True)
-			
-			secondary_dic = {}
-			for secondary_item in secondary_tags:
-				secondary_dic[secondary_item["name"]] = secondary_item
-			
+			except:
+				sys.stderr.write("\t" + "[error] latest_tagged" + "\n")
+				skip_flag = 1
+		
+		if (skip_flag == 0):
 			for primary_item in primary_tags:
 				add_flag = 0
 				
@@ -586,11 +679,12 @@ def main(args):
 					primary_item = get_evr(primary_item["name"], primary_repo)
 					secondary_item = secondary_dic[primary_item["name"]]
 					
-					evr_alpha = (str(secondary_item["epoch"]), secondary_item["version"], secondary_item["release"])
-					evr_beta = (str(primary_item["epoch"]), primary_item["version"], primary_item["release"])
-					
-					if (rpm.labelCompare(evr_alpha, evr_beta) < 0):
-						add_flag = 1
+					if (len(primary_item.keys()) > 3):
+						evr_alpha = (str(secondary_item["epoch"]), secondary_item["version"], secondary_item["release"])
+						evr_beta = (str(primary_item["epoch"]), primary_item["version"], primary_item["release"])
+						
+						if (rpm.labelCompare(evr_alpha, evr_beta) < 0):
+							add_flag = 1
 				
 				if (add_flag == 1):
 					que_count = check_list(que_list, primary_item["name"])
@@ -761,7 +855,8 @@ def main(args):
 					secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
 					miss_list[x]["que_state"] = koji_state(task_info[0]["nvr"], secondary_obj)
 					sys.stderr.write("\t" + "[info] build_info: " + str(miss_list[x]["que_state"]) + "\n")
-					que_list.append(miss_list[x])
+					if ((miss_list[x]["que_state"]["state"] != 0) and (miss_list[x]["que_state"]["state"] != 1)):
+						que_list.append(miss_list[x])
 			
 			x += 1
 		
@@ -771,19 +866,21 @@ def main(args):
 		    * Inner que'ing loop for the first level of processed packages *
 		    **************************************************************** '''
 		
-		seen_list = []
-		que_prio = {}
+		sys.stdout.write("[info] Starting que loop..." + "\n")
+		
+		wait_list = []
+		(que_order, que_error, que_list) = process_que(que_list)
+		if (len(que_order) > 0):
+			for que_item in que_order[0]:
+				wait_list.append(que_item)
+		
 		while (1):
-			(que_order, que_error, que_list) = process_que(que_list)
-			conf_opts = conf_file(sys.argv[1], conf_opts)
-			
-			if (len(que_order) < 1):
-				break
-			
 			sys.stdout.write("\n")
 			sys.stdout.write("#############" + "\n")
 			sys.stdout.write("# Que Round #" + "\n")
 			sys.stdout.write("#############" + "\n\n")
+			
+			conf_opts = conf_file(sys.argv[1], conf_opts)
 			
 			''' Login and authenticate to the Koji server '''
 			
@@ -794,14 +891,6 @@ def main(args):
 				sys.stderr.write("\t" + "[error] build_login" + "\n")
 				time.sleep(wait_time)
 				continue
-			
-			''' Send any packages marked as a priority for build '''
-			
-			for prio_item in que_prio.keys():
-				if (not "sent_flag" in que_prio[prio_item].keys()):
-					sys.stdout.write("que[p]: " + form_info(que_prio[prio_item],"task_info") + "\n")
-					que_build(conf_opts["tag_name"], que_prio[prio_item], secondary_obj)
-					que_prio[prio_item]["sent_flag"] = 1
 			
 			''' Get a count of our active tasks '''
 			
@@ -816,47 +905,35 @@ def main(args):
 				time.sleep(wait_time)
 				continue
 			
-			''' Que any regular packages now '''
+			''' Que any new packages now '''
 			
-			que_level = 0
-			add_flag = 0
-			for list_item in que_order:
-				for que_item in list_item:
-					sys.stdout.write(("que[%d] [%d/%d]: " % (que_level, que_length, conf_opts["que_limit"])) + form_info(que_item,"task_info") + "\n")
-					if ((que_level == 0) and (not que_item["srpm_name"] in seen_list)):
-						if (que_length < conf_opts["que_limit"]):
-							que_length += que_build(conf_opts["tag_name"], que_item, secondary_obj)
-							seen_list.append(que_item["srpm_name"])
-						add_flag = 1
-				que_level += 1
+			if (len(wait_list) < 1):
+				if (len(que_error) < 1):
+					break
+				while ((len(que_error) > 0) and (len(wait_list) < conf_opts["que_limit"])):
+					if (last_root(conf_opts["tag_name"], conf_opts["primary_url"], que_error[0]) == True):
+						wait_list.append(que_error[0])
+					que_error.pop(0)
 			
-			for error_item in que_error:
-				sys.stdout.write("que[e]: " + form_info(error_item,"task_info") + "\n")
-			
-			if (add_flag == 0):
-				break
-			
-			''' Update the build states of the qued packages '''
-			
-			for seen_item in seen_list:
-				for que_item in que_list:
-					if (que_item["srpm_name"] == seen_item):
-						que_item["que_state"] = koji_state(que_item["task_info"][0]["nvr"], secondary_obj)
-						req_list = proc_error(que_item["que_state"], secondary_obj)
-						for req_name in req_list:
-							for que_temp in que_list:
-								if ((que_temp["srpm_name"] == req_name) and (not req_name in que_prio.keys())):
-									que_prio[req_name] = que_temp
+			while ((len(wait_list) > 0) and (que_length < conf_opts["que_limit"])):
+				pkg_envr = wait_list[0]["task_info"][0]["nvr"]
+				if (not pkg_envr in seen_list):
+					sys.stdout.write(("que [%s] [%d/%d]: " % (conf_opts["tag_name"], que_length + 1, conf_opts["que_limit"])) + form_info(wait_list[0],"task_info") + "\n")
+					que_length += que_build(conf_opts["tag_name"], wait_list[0], secondary_obj)
+					seen_list.append(pkg_envr)
+				wait_list.pop(0)
 			
 			#sys.exit(0)
 			
 			time.sleep(wait_time)
 		
+		#error packages are ones that we sent for build but failed (check build states once only & wait for those currently building)
+		
 		''' End of infinite outer loop '''
 		
 		#sys.exit(0)
 		
-		sys.stderr.write("[info] sleeping..." + "\n")
+		sys.stdout.write("[info] Exited que loop..." + "\n")
 		time.sleep(wait_time)
 
 if (__name__ == "__main__"):
