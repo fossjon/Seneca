@@ -1,5 +1,5 @@
 Name:		livemedia-modifier
-Version:	1.4
+Version:	1.6
 Release:	1%{?dist}
 Summary:	Takes an ARM image file and finalizes it with device specific configurations and modifications
 
@@ -36,6 +36,9 @@ install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_sbindir}/
 
 
 %changelog
+* Fri Feb 01 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.6-1
+- Removed vexpress boot script creation and modified guru uboot configuration
+
 * Wed Jan 23 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.4-1
 - Fixed a small bug in creating a rootfs in lmm
 

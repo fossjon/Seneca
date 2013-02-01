@@ -1,13 +1,12 @@
 #!/usr/bin/python
 
+# Version: 1.1
+# Date: 01/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
-# Version: 1.0
-# Date: 30/01/2013 (dd/mm/yyyy)
 #
 # Execution notes (*you must*):
 #
-# - Allow any new package names for the given build tag
-# - Tag any previously completed builds into the new tag if required
+# - Allow and add any new package names for the given build tag
 # - Resolve any circular dependency package issues
 
 '''
@@ -493,6 +492,7 @@ def last_root(koji_tag, koji_url, pkg_item):
 			
 			prev_tag = (int(tag_numb) - 1)
 			
+			arch_list = []
 			try:
 				child_list = koji_obj.getTaskChildren(last_build["task_id"])
 			except:
@@ -501,25 +501,30 @@ def last_root(koji_tag, koji_url, pkg_item):
 				for arch_item in [child_item["arch"], child_item["label"]]:
 					if ((arch_item == "srpm") or (arch_item == "noarch") or (arch_item == "tag")):
 						continue
-					last_rels = []
-					yum_flag = 0
-					try:
-						log_list = urllib.urlopen("%s/%s/%s/root.log" % (koji_url, log_path, arch_item)).readlines()
-					except:
-						log_list = []
-					for log_line in log_list:
-						log_line = log_line.replace("\t"," ").strip()
-						if (yum_flag == 1):
-							for dep_name in pkg_item["dep_list"]:
-								regx_obj = re.match("^.* ([^ ]+)[ ]+[^ ]+[ ]+[^ ]+\.fc%d .*$" % (prev_tag), log_line)
-								if ((regx_obj) and (regx_obj.group(1) == dep_name) and (not dep_name in last_rels)):
-									last_rels.append(dep_name)
-						if (re.match("^.*package[ ]+arch[ ]+version.*$", log_line, re.I)):
-							yum_flag = 1
-						if (re.match("^.*transaction[ ]+summary.*$", log_line, re.I)):
-							yum_flag = 0
-					if (len(last_rels) == len(pkg_item["dep_list"])):
-						return True
+					if (arch_item in arch_list):
+						continue
+					arch_list.append(arch_item)
+			
+			for arch_item in arch_list:
+				last_rels = []
+				yum_flag = 0
+				try:
+					log_list = urllib.urlopen("%s/%s/%s/root.log" % (koji_url, log_path, arch_item)).readlines()
+				except:
+					log_list = []
+				for log_line in log_list:
+					log_line = log_line.replace("\t"," ").strip()
+					if (yum_flag == 1):
+						for dep_name in pkg_item["dep_list"]:
+							regx_obj = re.match("^.* ([^ ]+)[ ]+[^ ]+[ ]+[^ ]+\.fc%d .*$" % (prev_tag), log_line)
+							if ((regx_obj) and (regx_obj.group(1) == dep_name) and (not dep_name in last_rels)):
+								last_rels.append(dep_name)
+					if (re.match("^.*package[ ]+arch[ ]+version.*$", log_line, re.I)):
+						yum_flag = 1
+					if (re.match("^.*transaction[ ]+summary.*$", log_line, re.I)):
+						yum_flag = 0
+				if (len(last_rels) == len(pkg_item["dep_list"])):
+					return True
 	
 	return False
 
@@ -874,10 +879,13 @@ def main(args):
 				wait_list.append(que_item)
 		
 		while (1):
+			str_out = ("Que Round: waiting [%d] -- errors [%d]" % (len(wait_list), len(que_error)))
+			str_len = len(str_out)
+			sym_out = ("#" * str_len)
 			sys.stdout.write("\n")
-			sys.stdout.write("#############" + "\n")
-			sys.stdout.write("# Que Round #" + "\n")
-			sys.stdout.write("#############" + "\n\n")
+			sys.stdout.write(("##%s##" % (sym_out)) + "\n")
+			sys.stdout.write(("# %s #" % (str_out)) + "\n")
+			sys.stdout.write(("##%s##" % (sym_out)) + "\n\n")
 			
 			conf_opts = conf_file(sys.argv[1], conf_opts)
 			

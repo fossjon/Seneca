@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.5
-Date:     30/01/2013 (dd/mm/yyyy)
+Version:  1.6
+Date:     01/02/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -198,7 +198,7 @@ def form(opts):
 			disk(opts, "d")
 			sys.exit(1)
 		
-		# Modify the partition type
+		# Modify the partition filesystem
 		
 		pipe = subprocess.Popen(["/sbin/sfdisk", "-d", opts["disk"][2]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		outp = pipe.stdout.readlines()
@@ -220,7 +220,7 @@ def form(opts):
 		pipe.communicate()
 		pipe.stdout.close()
 		
-		# Format the partition
+		# Format the partition filesystem
 		
 		print("Mkfs :: %s" % (opts["boot"][2]))
 		
@@ -358,7 +358,7 @@ def conf(opts):
 	
 	dirp = ("%s/%s" % (fold, name))
 	
-	if (opts["type"][2] == ARMS["panda"]):
+	if ((opts["type"][2] == ARMS["guru"]) or (opts["type"][2] == ARMS["panda"])):
 		# Fix the fstab file with the new partition UUID
 		
 		uuid = ""
@@ -394,8 +394,12 @@ def conf(opts):
 			filo = open(filn, "w")
 			
 			for fili in fill:
-				if (re.match("^.* /boot[/ ].*$", fili, re.I)):
-					fili = ("UUID=%s        /boot/uboot        vfat        defaults,noauto        1 2\n" % (uuid))
+				regx = re.match("^.* (/boot[/ ].*)$", fili, re.I)
+				if (regx):
+					if (opts["type"][2] == ARMS["guru"]):
+						fili = ("UUID=%s        %s\n" % (uuid, regx.group(1)))
+					if (opts["type"][2] == ARMS["panda"]):
+						fili = ("UUID=%s        /boot/uboot        vfat        defaults,noauto        1 2\n" % (uuid))
 					print("Write :: [%s] <- [%s]" % (filn, uuid))
 				filo.write(fili)
 			
@@ -405,7 +409,8 @@ def conf(opts):
 			print("Could not write to file [%s]!" % (filn))
 			disk(opts, "d")
 			sys.exit(1)
-		
+	
+	if (opts["type"][2] == ARMS["panda"]):
 		# Fix the sysconfig uboot file with a new path to the uboot directory
 		
 		try:
