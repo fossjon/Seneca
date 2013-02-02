@@ -593,6 +593,39 @@ def conf_file(file_name, old_opts):
 	return old_opts
 
 '''
+	Define a db method so other scripts can check our recorded state of packages
+'''
+
+def local_db(lock_db=0, rpm_data=None):
+	db_conn = sqlite3.connect(".koji-follow.state.db")
+	db_curs = db_conn.cursor()
+	
+	try:
+		db_curs.execute("CREATE TABLE status (lock_flag text);")
+	except:
+		pass
+	
+	try:
+		db_curs.execute("CREATE TABLE packages (pkg_name text, pkg_info text);")
+	except:
+		pass
+	
+	if (lock_db != 0):
+		db_curs.execute("DELETE FROM status;")
+	if (lock_db == 1):
+		db_curs.execute("INSERT INTO status VALUES ('true');")
+	if (lock_db == 3):
+		db_curs.execute("INSERT INTO status VALUES ('true');")
+		db_curs.execute("DELETE FROM packages;")
+	
+	if (rpm_data):
+		db_curs.execute("DELETE FROM packages WHERE pkg_name = '%s';" % (rpm_data["srpm_name"]))
+		db_curs.execute("INSERT INTO packages VALUES ('%s', \"%s\");" % (rpm_data["srpm_name"], str(rpm_data)))
+	
+	db_conn.commit()
+	db_conn.close()
+
+'''
 	The main method containing the continuous primary task check/watch loop
 '''
 
@@ -617,7 +650,7 @@ def main(args):
 	while (1):
 		skip_flag = 0
 		primary_repo = ""
-		miss_list = [] ; seen_list = []
+		miss_list = [] ; que_list = [] ; seen_list = []
 		conf_opts = conf_file(sys.argv[1], conf_opts)
 		
 		#list all of the files in the pwd and delete them
@@ -779,6 +812,7 @@ def main(args):
 		    ********************************************** '''
 		
 		x = 0
+		local_db(lock_db=3, rpm_data=None)
 		
 		while (x < len(miss_list)):
 			sys.stderr.write("[info] processing: " + ("[%d/%d] " % (x + 1, len(miss_list))) + form_info(miss_list[x],"task_info") + "\n")
@@ -861,9 +895,11 @@ def main(args):
 					sys.stderr.write("\t" + "[info] build_info: " + str(miss_list[x]["que_state"]) + "\n")
 					if ((miss_list[x]["que_state"]["state"] != 0) and (miss_list[x]["que_state"]["state"] != 1)):
 						que_list.append(miss_list[x])
+						local_db(lock_db=0, rpm_data=miss_list[x])
 			
 			x += 1
 		
+		local_db(lock_db=2, rpm_data=None)
 		#sys.exit(0)
 		
 		''' ****************************************************************
