@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.6
-Date:     01/02/2013 (dd/mm/yyyy)
+Version:  1.7
+Date:     04/02/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -141,14 +141,20 @@ def mnts(opts, devs):
 		if ((keyn != "boot") and (keyn != "root")):
 			continue
 		
-		pipe = subprocess.Popen(["/bin/umount", opts[keyn][1]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-		pipe.stdout.close()
-		
 		mdir("", opts[keyn][1])
 		
-		print("Mount :: [%s] -> [%s]" % (opts[keyn][2], opts[keyn][1]))
-		
-		retn = subprocess.call(["/bin/mount", opts[keyn][2], opts[keyn][1]])
+		for x in range(0, 3):
+			pipe = subprocess.Popen(["/bin/umount", opts[keyn][1]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+			pipe.stdout.close()
+			
+			print("Mount :: [%s] -> [%s]" % (opts[keyn][2], opts[keyn][1]))
+			
+			retn = subprocess.call(["/bin/mount", opts[keyn][2], opts[keyn][1]])
+			
+			if (retn == 0):
+				break
+			
+			time.sleep(1)
 		
 		if (retn != 0):
 			print("Error mounting the [%s] partition!" % (keyn))
