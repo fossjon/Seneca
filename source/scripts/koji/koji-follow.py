@@ -368,7 +368,8 @@ def process_que(inpt_list):
 			break
 		for tmp_item in tmp_list:
 			if (wait_flag == 0):
-				ready_list.append(tmp_item)
+				if (tmp_item["que_state"]["state"] != 0):
+					ready_list.append(tmp_item)
 			else:
 				wait_list.append(tmp_item)
 		wait_flag = 1
@@ -750,6 +751,7 @@ def main(args):
 			********************************************** '''
 		
 		if (loop_flag == 0):
+			update_time = int(time.time())
 			que_list = {}
 			x = 0 ; l = len(check_list.keys())
 			
@@ -759,7 +761,7 @@ def main(args):
 				que_item = check_list[check_key]
 				task_info = que_item["task_info"]
 				
-				sys.stderr.write("[info] processing: " + ("[%d/%d]: " % (x, l)) + form_info(que_item,"task_info") + "\n")
+				sys.stderr.write("[info] processing: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
 				
 				if (skip_flag == 0):
 					if (que_item["arch_flag"] == False):
@@ -769,7 +771,7 @@ def main(args):
 							* Upload, import, tag, and skip any noarch detected packages *
 							************************************************************** '''
 						
-						sys.stderr.write("\t" + "[info]" + " noarch: " + ("[%s] <- [%s] <- [%s]" % (conf_opts["tag_name"], task_info[0]["nvr"], que_item["srpm_name"])) + "\n")
+						sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
 						
 						''' Download all of the noarch rpm files '''
 						
@@ -894,9 +896,9 @@ def main(args):
 					
 					#sys.stderr.write("\t" + "[info] dep_list: " + str(que_item["dep_list"]) + "\n")
 				
-				''' *********************************************************************************************
-					* Get the current build status of this package and skip ones that are building or completed *
-					********************************************************************************************* '''
+				''' *********************************************************************************
+					* Get the current build status of this package and skip ones that are completed *
+					********************************************************************************* '''
 				
 				if (skip_flag == 0):
 					try:
@@ -905,7 +907,8 @@ def main(args):
 						
 						#sys.stderr.write("\t" + "[info] build_state: " + str(que_item["que_state"]) + "\n")
 						
-						if ((que_item["que_state"]["state"] == 0) or (que_item["que_state"]["state"] == 1)):
+						if (que_item["que_state"]["state"] == 1):
+							sys.stderr.write("\t" + "[info] build_complete" + "\n")
 							skip_flag = 1
 					
 					except:
@@ -930,15 +933,11 @@ def main(args):
 						if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
 							que_item["que_flag"] = False
 					
-					sys.stderr.write("\t" + "[info] completed: " + form_info(que_item,"task_info") + "\n")
+					sys.stderr.write("\t" + "[info] processed: " + form_info(que_item,"task_info") + "\n")
 					
 					que_list[check_key] = que_item
+					local_db(que_item, update_time)
 			
-			''' Save our que list for other reporting tools '''
-			
-			update_time = int(time.time())
-			for que_key in que_list.keys():
-				local_db(que_list[que_key], update_time)
 			local_db(None, update_time)
 		
 		''' ****************************************************************
