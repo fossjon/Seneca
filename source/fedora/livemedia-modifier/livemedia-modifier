@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.7
-Date:     04/02/2013 (dd/mm/yyyy)
+Version:  1.8
+Date:     06/02/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -230,7 +230,12 @@ def form(opts):
 		
 		print("Mkfs :: %s" % (opts["boot"][2]))
 		
-		retn = subprocess.call(["/sbin/mkfs.vfat", "-F", "32", "-n", "uboot", opts["boot"][2]])
+		if (opts["type"][2] == ARMS["guru"]):
+			label = "boot"
+		if (opts["type"][2] == ARMS["panda"]):
+			label = "uboot"
+		
+		retn = subprocess.call(["/sbin/mkfs.vfat", "-F", "32", "-n", label, opts["boot"][2]])
 		
 		if (retn != 0):
 			print("Error making filesystem on [%s]!" % (opts["boot"][2]))
@@ -400,13 +405,15 @@ def conf(opts):
 			filo = open(filn, "w")
 			
 			for fili in fill:
-				regx = re.match("^.* (/boot[/ ].*)$", fili, re.I)
+				regx = re.match("^.* (/boot[/ ][^ ]*)(.*)$", fili.replace("\t"," ").strip(), re.I)
 				if (regx):
+					dirn = re.sub(" .*$", "", regx.group(1))
 					if (opts["type"][2] == ARMS["guru"]):
-						fili = ("UUID=%s        %s\n" % (uuid, regx.group(1)))
+						bdir = "/boot"
 					if (opts["type"][2] == ARMS["panda"]):
-						fili = ("UUID=%s        /boot/uboot        vfat        defaults,noauto        1 2\n" % (uuid))
-					print("Write :: [%s] <- [%s]" % (filn, uuid))
+						bdir = "/boot/uboot"
+					fili = ("UUID=%s        %s        vfat        defaults,noauto        1 2\n" % (uuid, bdir))
+					print("Write :: [%s] <- [%s] [%s]" % (filn, uuid, dirn))
 				filo.write(fili)
 			
 			filo.close()

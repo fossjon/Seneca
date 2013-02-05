@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# Version: 1.2
-# Date: 04/02/2013 (dd/mm/yyyy)
+# Version: 1.3
+# Date: 05/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 #
 # Execution notes (*you must*):
@@ -427,7 +427,7 @@ def proc_error(info_obj, koji_obj):
 	Attempt to find the original build root environment and the release version of the deps installed
 '''
 
-def last_root(koji_tag, koji_url, pkg_item):
+def last_root(koji_tag, koji_url, pkg_item, obj_only=0):
 	try:
 		koji_obj = koji.ClientSession("%s/kojihub" % (koji_url))
 		search_list = koji_obj.search(pkg_item["srpm_name"], "package", "glob")
@@ -454,6 +454,9 @@ def last_root(koji_tag, koji_url, pkg_item):
 						last_build = build_item
 					elif (build_item["creation_ts"] < last_build["creation_ts"]):
 						last_build = build_item
+		
+		if (obj_only == 1):
+			return last_build
 		
 		if (last_build):
 			try:
@@ -502,6 +505,23 @@ def last_root(koji_tag, koji_url, pkg_item):
 					return True
 	
 	return False
+
+'''
+	Insert a qued pkg item in order related to when it was built
+'''
+
+def sorted_insert(insert_item, input_list):
+	final_list = []
+	insert_flag = 0
+	
+	for input_item in input_list:
+		if ((input_item[0] < insert_item[0]) or (insert_flag != 0)):
+			final_list.append(input_item)
+		else:
+			final_list.append(insert_item)
+			insert_flag = 1
+	
+	return final_list
 
 '''
 	Que a package to be built
@@ -623,42 +643,40 @@ def main(args):
 	
 	while (1):
 		loop_flag = 0
-		primary_repo = ""
 		conf_opts = conf_file(sys.argv[1], conf_opts)
-		check_list = {}
 		
 		if (conf_opts["retry_flag"] == True):
 			for que_key in que_list.keys():
 				que_list[que_key]["que_flag"] = False
 		
-		#list all of the files in the pwd and delete them
-		
-		''' Get the build target tag for the given tag name '''
-		
-		if (loop_flag == 0):
-			try:
-				primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
-				release_info = primary_obj.getBuildTarget(conf_opts["tag_name"])
-			except:
-				sys.stderr.write("\t" + "[error] build_target: " + conf_opts["tag_name"] + "\n")
-				loop_flag = 1
+		#list all of the *un-used/needed* files in the pwd and delete them
 		
 		''' *******************************************************************************************************
 		    * Download the latest repodata files so we can process packages and convert any "BuildRequires" names *
 		    ******************************************************************************************************* '''
 		
 		if (loop_flag == 0):
+			primary_repo = ""
+			
 			try:
-				primary_repo = ("primary.%s.db" % (release_info["build_tag_name"]))
-				delete(primary_repo)
-				primary_repo = get_repodata(conf_opts["primary_url"], conf_opts["primary_arch"], release_info["build_tag_name"], primary_repo)
+				primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
+				release_info = primary_obj.getBuildTarget(conf_opts["tag_name"])
 				
-				if (not os.path.exists(primary_repo)):
-					sys.stderr.write("\t" + "[error] repodata_file: " + primary_repo + "\n")
+				try:
+					primary_repo = ("primary.%s.db" % (release_info["build_tag_name"]))
+					delete(primary_repo)
+					primary_repo = get_repodata(conf_opts["primary_url"], conf_opts["primary_arch"], release_info["build_tag_name"], primary_repo)
+					
+					if (not os.path.exists(primary_repo)):
+						sys.stderr.write("\t" + "[error] repodata_file: " + primary_repo + "\n")
+						loop_flag = 1
+				
+				except:
+					sys.stderr.write("\t" + "[error] repodata_taginfo: " + conf_opts["tag_name"] + "\n")
 					loop_flag = 1
 			
 			except:
-				sys.stderr.write("\t" + "[error] repodata_taginfo: " + conf_opts["tag_name"] + "\n")
+				sys.stderr.write("\t" + "[error] build_target: " + conf_opts["tag_name"] + "\n")
 				loop_flag = 1
 		
 		''' **********************************************************
@@ -688,6 +706,7 @@ def main(args):
 		    ******************************************************************* '''
 		
 		if (loop_flag == 0):
+			check_list = {}
 			x = 0 ; l = len(primary_tags)
 			
 			for primary_item in primary_tags:
@@ -750,7 +769,7 @@ def main(args):
 							* Upload, import, tag, and skip any noarch detected packages *
 							************************************************************** '''
 						
-						sys.stderr.write("\t" + "[info]" + " noarch: " + que_item["srpm_name"] + "\n")
+						sys.stderr.write("\t" + "[info]" + " noarch: " + ("[%s] <- [%s] <- [%s]" % (conf_opts["tag_name"], task_info[0]["nvr"], que_item["srpm_name"])) + "\n")
 						
 						''' Download all of the noarch rpm files '''
 						
@@ -787,28 +806,28 @@ def main(args):
 									file_path = ("%s/%s" % (pres_dir, rpm_name))
 									server_dir = _unique_path("cli-import")
 									
-									sys.stderr.write("\t" + "[info] import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
+									#sys.stderr.write("\t" + "[info] import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
 									
 									try:
 										secondary_obj.uploadWrapper(file_path, server_dir)
 										try:
 											secondary_obj.importRPM(server_dir, rpm_name)
 										except:
-											sys.stderr.write("\t" + "[error] noarch_import" + "\n")
+											sys.stderr.write("\t" + "[error] noarch_import: " + ("[%s] -> [%s]" % (server_dir, rpm_name)) + "\n")
 									except:
-										sys.stderr.write("\t" + "[error] noarch_upload" + "\n")
+										sys.stderr.write("\t" + "[error] noarch_upload: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
 						
 						''' Tag the source rpm name '''
 						
 						if (noarch_flag == 0):
 							for pkg_item in task_info:
 								if (pkg_item["arch"] == "src"):
-									sys.stderr.write("\t" + "[info] tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
+									#sys.stderr.write("\t" + "[info] tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
 									
 									try:
 										secondary_obj.tagBuild(conf_opts["tag_name"], pkg_item["nvr"])
 									except:
-										sys.stderr.write("\t" + "[error] noarch_tag" + "\n")
+										sys.stderr.write("\t" + "[error] noarch_tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
 						
 						skip_flag = 1
 				
@@ -837,24 +856,29 @@ def main(args):
 							spec_list = os.listdir(spec_path)
 							spec_file = (spec_path + "/" + spec_list[0])
 							
-							srpm_out = subprocess.check_output(["/usr/bin/rpmbuild", "-bs", "--target", conf_opts["target_arch"], spec_file], stderr=subprocess.STDOUT)
+							try:
+								srpm_out = subprocess.check_output(["/usr/bin/rpmbuild", "-bs", "--target", conf_opts["target_arch"], spec_file], stderr=subprocess.STDOUT)
+								
+								for out_line in srpm_out.split("\n"):
+									out_line = out_line.strip()
+									if (out_line[:7].lower() == "wrote: "):
+										srpm_file = out_line[7:]
+								
+								#sys.stderr.write("\t" + "[info] rpm_build: " + ("([%s] [%s]) -> [%s]" % (conf_opts["target_arch"], spec_file, srpm_file)) + "\n")
+								
+								rpm_info = rpm_header(srpm_file, None)
+								que_item["cap_list"] = rpm_info[1]
 							
-							for out_line in srpm_out.split("\n"):
-								out_line = out_line.strip()
-								if (out_line[:7].lower() == "wrote: "):
-									srpm_file = out_line[7:]
-							
-							sys.stderr.write("\t" + "[info] rpm_build: " + ("([%s] [%s]) -> [%s]" % (conf_opts["target_arch"], spec_file, srpm_file)) + "\n")
-							
-							rpm_info = rpm_header(srpm_file, None)
-							que_item["cap_list"] = rpm_info[1]
+							except:
+								sys.stderr.write("\t" + "[error] rpm_build: " + ("[%s] -> [%s]" % (spec_file, srpm_file)) + "\n")
+								skip_flag = 1
 						
 						except:
-							sys.stderr.write("\t" + "[error] spec_file: " + srpm_file + "\n")
+							sys.stderr.write("\t" + "[error] rpm_spec: " + srpm_file + "\n")
 							skip_flag = 1
 					
 					else:
-						sys.stderr.write("\t" + "[error] rpmdev_install: " + srpm_file + "\n")
+						sys.stderr.write("\t" + "[error] rpm_install: " + srpm_file + "\n")
 						skip_flag = 1
 				
 				''' *******************************************************************************************************
@@ -868,7 +892,7 @@ def main(args):
 					for req_item in req_list:
 						que_item["dep_list"].append(req_item[0])
 					
-					sys.stderr.write("\t" + "[info] dep_list: " + str(que_item["dep_list"]) + "\n")
+					#sys.stderr.write("\t" + "[info] dep_list: " + str(que_item["dep_list"]) + "\n")
 				
 				''' *********************************************************************************************
 					* Get the current build status of this package and skip ones that are building or completed *
@@ -879,7 +903,7 @@ def main(args):
 						secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
 						que_item["que_state"] = koji_state(task_info[0]["nvr"], secondary_obj)
 						
-						sys.stderr.write("\t" + "[info] build_state: " + str(que_item["que_state"]) + "\n")
+						#sys.stderr.write("\t" + "[info] build_state: " + str(que_item["que_state"]) + "\n")
 						
 						if ((que_item["que_state"]["state"] == 0) or (que_item["que_state"]["state"] == 1)):
 							skip_flag = 1
@@ -906,84 +930,92 @@ def main(args):
 						if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
 							que_item["que_flag"] = False
 					
+					sys.stderr.write("\t" + "[info] completed: " + form_info(que_item,"task_info") + "\n")
+					
 					que_list[check_key] = que_item
-		
-		''' Save our que list for other reporting tools '''
-		
-		update_time = int(time.time())
-		for que_key in que_list.keys():
-			local_db(que_list[que_key], update_time)
-		local_db(None, update_time)
+			
+			''' Save our que list for other reporting tools '''
+			
+			update_time = int(time.time())
+			for que_key in que_list.keys():
+				local_db(que_list[que_key], update_time)
+			local_db(None, update_time)
 		
 		''' ****************************************************************
 		    * Inner que'ing loop for the first level of processed packages *
 		    **************************************************************** '''
 		
-		(que_ready, que_wait, que_error) = process_que(que_list)
-		
-		sys.stdout.write("[info] Starting que loop..." + "\n")
-		
-		while (1):
-			conf_opts = conf_file(sys.argv[1], conf_opts)
+		if (loop_flag == 0):
+			(que_ready, que_wait, que_error) = process_que(que_list)
 			
-			str_out = ("Que Round :: ready [%d] -- waiting [%d] -- errors [%d]" % (len(que_ready), len(que_wait), len(que_error)))
-			str_len = len(str_out) ; sym_out = ("#" * str_len)
-			sys.stdout.write("\n##%s##\n# %s #\n##%s##\n\n" % (sym_out, str_out, sym_out))
+			sys.stdout.write("[info] Starting inner que loop..." + "\n")
 			
-			''' Login and authenticate to the Koji server '''
-			
-			try:
-				secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
-				secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
-			except:
-				sys.stderr.write("\t" + "[error] build_login" + "\n")
-				time.sleep(wait_time)
-				continue
-			
-			''' Check for any solvable error packages or exit now if our que list is empty '''
-			
-			if (len(que_ready) < 1):
-				if (len(que_error) < 1):
-					while (len(que_wait) > 0):
-						sys.stdout.write(("que[w] [-%d/%d]: " % (len(que_wait), conf_opts["que_limit"])) + form_info(que_wait[0],"task_info") + "\n")
-						que_wait.pop(0)
-					break
-				while ((len(que_error) > 0) and (len(que_ready) < conf_opts["que_limit"])):
-					if (last_root(conf_opts["tag_name"], conf_opts["primary_url"], que_error[0]) == True):
-						que_ready.append(que_error[0])
+			while (1):
+				conf_opts = conf_file(sys.argv[1], conf_opts)
+				
+				str_out = ("Que Round :: ready [%d] -- waiting [%d] -- errors [%d]" % (len(que_ready), len(que_wait), len(que_error)))
+				str_len = len(str_out) ; sym_out = ("#" * str_len)
+				sys.stdout.write("\n##%s##\n# %s #\n##%s##\n\n" % (sym_out, str_out, sym_out))
+				
+				''' Login and authenticate to the Koji server '''
+				
+				try:
+					secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
+					secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
+				except:
+					sys.stderr.write("\t" + "[error] build_login" + "\n")
+					time.sleep(wait_time)
+					continue
+				
+				''' Check for any solvable error packages or exit now if our que list is empty '''
+				
+				if (len(que_ready) < 1):
+					if (len(que_error) < 1):
+						while (len(que_wait) > 0):
+							sys.stdout.write(("que[w] [-%d/%d]: " % (len(que_wait), conf_opts["que_limit"])) + form_info(que_wait[0],"task_info") + "\n")
+							que_wait.pop(0)
+						break
 					else:
-						sys.stdout.write(("que[e] [-%d/%d]: " % (len(que_error), conf_opts["que_limit"])) + form_info(que_error[0],"task_info") + "\n")
-					que_error.pop(0)
-			
-			''' Get a count of our active tasks '''
-			
-			try:
-				secondary_tasks = secondary_obj.listTasks(opts={"state":[0,1], "method":"build"}, queryOpts={"limit":900})
-				#list my tasks only
-				que_length = len(secondary_tasks)
-				if (que_length >= conf_opts["que_limit"]):
-					raise NameError("TooManyTasks")
-			except:
-				sys.stderr.write("\t" + "[error] task_list/que_max: " + ("[%d/%d]" % (que_length, conf_opts["que_limit"])) + "\n")
+						sorted_que = []
+						while (len(que_error) > 0):
+							sys.stdout.write(("que[e] [-%d/%d]: " % (len(que_error), conf_opts["que_limit"])) + form_info(que_error[0],"task_info") + "\n")
+							init_item = last_root(conf_opts["tag_name"], conf_opts["primary_url"], que_error[0], obj_only=1)
+							if (init_item):
+								sorted_que = sorted_insert([init_item["creation_ts"], que_error[0]], sorted_que)
+							que_error.pop(0)
+						for que_item in sorted_que:
+							que_ready.append(que_item[1])
+				
+				''' Get a count of our active tasks '''
+				
+				try:
+					secondary_tasks = secondary_obj.listTasks(opts={"state":[0,1], "method":"build"}, queryOpts={"limit":900})
+					#list my tasks only
+					que_length = len(secondary_tasks)
+					if (que_length >= conf_opts["que_limit"]):
+						raise NameError("TooManyTasks")
+				except:
+					sys.stderr.write("[info] task_list/que_max: " + ("[%d/%d]" % (que_length, conf_opts["que_limit"])) + "\n")
+					time.sleep(wait_time)
+					continue
+				
+				''' Que any new packages now '''
+				
+				while ((len(que_ready) > 0) and (que_length < conf_opts["que_limit"])):
+					pkg_name = que_ready[0]["srpm_name"]
+					pkg_envr = que_ready[0]["task_info"][0]["nvr"]
+					if (que_ready[0]["que_flag"] == False):
+						sys.stdout.write(("que[%s] [-%d/%d]: " % (conf_opts["tag_name"], len(que_ready), conf_opts["que_limit"])) + form_info(que_ready[0],"task_info") + "\n")
+						que_length += que_build(conf_opts["tag_name"], que_ready[0], secondary_obj)
+						que_list[pkg_name]["que_flag"] = True
+					que_ready.pop(0)
+				
 				time.sleep(wait_time)
-				continue
 			
-			''' Que any new packages now '''
-			
-			while ((len(que_ready) > 0) and (que_length < conf_opts["que_limit"])):
-				pkg_name = que_ready[0]["srpm_name"]
-				pkg_envr = que_ready[0]["task_info"][0]["nvr"]
-				if (que_ready[0]["que_flag"] == False):
-					sys.stdout.write(("que[%s] [-%d/%d]: " % (conf_opts["tag_name"], len(que_ready), conf_opts["que_limit"])) + form_info(que_ready[0],"task_info") + "\n")
-					que_length += que_build(conf_opts["tag_name"], que_ready[0], secondary_obj)
-					que_list[pkg_name]["que_flag"] = True
-				que_ready.pop(0)
-			
-			time.sleep(wait_time)
+			sys.stdout.write("[info] Exiting inner que loop..." + "\n")
 		
-		''' End of infinite outer loop '''
+		''' End of outer infinite loop '''
 		
-		sys.stdout.write("[info] Exited que loop..." + "\n")
 		time.sleep(wait_time)
 
 if (__name__ == "__main__"):
