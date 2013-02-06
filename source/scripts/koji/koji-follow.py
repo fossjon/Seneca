@@ -751,7 +751,6 @@ def main(args):
 		
 		if (loop_flag == 0):
 			update_time = int(time.time())
-			que_list = {}
 			x = 0 ; l = len(check_list.keys())
 			
 			for check_key in check_list.keys():
@@ -946,6 +945,10 @@ def main(args):
 					que_list[check_key] = que_item
 					local_db(que_item, update_time)
 			
+			for que_key in que_list.keys():
+				if (not que_key in check_list.keys()):
+					del que_list[que_key]
+			
 			local_db(None, update_time)
 		
 		''' ****************************************************************
@@ -1011,7 +1014,6 @@ def main(args):
 				
 				while ((len(que_ready) > 0) and (que_length < conf_opts["que_limit"])):
 					pkg_name = que_ready[0]["srpm_name"]
-					pkg_envr = que_ready[0]["task_info"][0]["nvr"]
 					
 					if (que_ready[0]["que_flag"] == False):
 						sys.stdout.write(("que[%s] [-%d/%d]: " % (conf_opts["tag_name"], len(que_ready), conf_opts["que_limit"])) + form_info(que_ready[0],"task_info") + "\n")
