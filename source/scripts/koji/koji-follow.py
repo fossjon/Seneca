@@ -337,7 +337,7 @@ def koji_state(pkg_nvr, koji_obj):
 	Reorder and organize the que items into a hierarchical list based on dependencies
 '''
 
-def process_que(inpt_list, block_list):
+def process_que(inpt_list):
 	for que_key in inpt_list.keys():
 		que_item = inpt_list[que_key]
 		tmp_list = []
@@ -371,10 +371,6 @@ def process_que(inpt_list, block_list):
 			break
 		for tmp_item in tmp_list:
 			if (wait_flag == 0):
-				if (tmp_item["que_state"]["state"] == 0):
-					tmp_item["que_flag"] = True
-				if (tmp_item["srpm_name"] in block_list):
-					tmp_item["que_flag"] = True
 				ready_list.append(tmp_item)
 			else:
 				wait_list.append(tmp_item)
@@ -940,6 +936,11 @@ def main(args):
 						if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
 							que_item["que_flag"] = False
 					
+					if (que_item["que_state"]["state"] == 0):
+						que_item["que_flag"] = True
+					if (que_item["srpm_name"] in conf_opts["excl_list"]):
+						que_item["que_flag"] = True
+					
 					sys.stderr.write("\t" + "[info] processed: " + form_info(que_item,"task_info") + "\n")
 					
 					que_list[check_key] = que_item
@@ -952,7 +953,7 @@ def main(args):
 		    **************************************************************** '''
 		
 		if (loop_flag == 0):
-			(que_ready, que_wait, que_error) = process_que(que_list, conf_opts["excl_list"])
+			(que_ready, que_wait, que_error) = process_que(que_list)
 			
 			sys.stdout.write("[info] Starting inner que loop..." + "\n")
 			
@@ -1011,10 +1012,12 @@ def main(args):
 				while ((len(que_ready) > 0) and (que_length < conf_opts["que_limit"])):
 					pkg_name = que_ready[0]["srpm_name"]
 					pkg_envr = que_ready[0]["task_info"][0]["nvr"]
+					
 					if (que_ready[0]["que_flag"] == False):
 						sys.stdout.write(("que[%s] [-%d/%d]: " % (conf_opts["tag_name"], len(que_ready), conf_opts["que_limit"])) + form_info(que_ready[0],"task_info") + "\n")
 						que_length += que_build(conf_opts["tag_name"], que_ready[0], secondary_obj)
 						que_list[pkg_name]["que_flag"] = True
+					
 					que_ready.pop(0)
 				
 				time.sleep(wait_time)
