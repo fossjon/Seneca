@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# Version: 1.3
-# Date: 05/02/2013 (dd/mm/yyyy)
+# Version: 1.4
+# Date: 06/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 #
 # Execution notes (*you must*):
@@ -924,11 +924,11 @@ def main(args):
 				if (skip_flag == 0):
 					que_item["que_flag"] = False
 					
-					if (que_item["srpm_name"] in que_list.keys()):
-						que_item["que_flag"] = prev_item["que_flag"]
-						
-						prev_item = que_list[que_item["srpm_name"]]
+					if (check_key in que_list.keys()):
+						prev_item = que_list[check_key]
 						prev_task = prev_item["task_info"]
+						
+						que_item["que_flag"] = prev_item["que_flag"]
 						
 						if (len(prev_item["dep_list"]) != len(que_item["dep_list"])):
 							que_item["que_flag"] = False
