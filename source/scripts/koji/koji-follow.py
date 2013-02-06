@@ -230,7 +230,7 @@ def map_cap(cap_list, db_name):
 		cap_name = ""
 		for cap_type in ["provides", "files"]:
 			try:
-				db_list = db_curs.execute("SELECT packages.rpm_sourcerpm,packages.epoch,packages.version,packages.release FROM %s JOIN packages ON packages.pkgKey = %s.pkgKey WHERE %s.name = '%s';" % (cap_type, cap_type, cap_type, cap_list[x][0]))
+				db_list = db_curs.execute("SELECT packages.rpm_sourcerpm FROM %s JOIN packages ON packages.pkgKey = %s.pkgKey WHERE %s.name = '%s';" % (cap_type, cap_type, cap_type, cap_list[x][0]))
 			except:
 				db_list = []
 			for pkg_item in db_list:
@@ -272,7 +272,7 @@ def get_pkgs(pkg_name, db_name):
 		if (rpm_name != pkg_name):
 			continue
 		if (not rpm_epoch):
-			rpm_epoch = None
+			rpm_epoch = "0"
 		
 		if (len(final_list) < 1):
 			pref_list = []
@@ -285,8 +285,12 @@ def get_pkgs(pkg_name, db_name):
 			item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
 			final_list.append(item_info)
 		
+		rpm_epoch = pkg_item[2]
+		if (not rpm_epoch):
+			rpm_epoch = "0"
+		rpm_epoch = str(rpm_epoch)
 		item_url = ("%s/%s" % (str(pkg_item[6]), str(pkg_item[7])))
-		item_info = {"name":str(pkg_item[1]), "epoch":str(pkg_item[2]), "version":str(pkg_item[3]), "release":str(pkg_item[4]), "arch":str(pkg_item[5]), "url":item_url}
+		item_info = {"name":str(pkg_item[1]), "epoch":rpm_epoch, "version":str(pkg_item[3]), "release":str(pkg_item[4]), "arch":str(pkg_item[5]), "url":item_url}
 		item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
 		final_list.append(item_info)
 		
@@ -334,7 +338,7 @@ def koji_state(pkg_nvr, koji_obj):
 	Reorder and organize the que items into a hierarchical list based on dependencies
 '''
 
-def process_que(inpt_list):
+def process_que(inpt_list, block_list):
 	for que_key in inpt_list.keys():
 		que_item = inpt_list[que_key]
 		tmp_list = []
@@ -369,7 +373,10 @@ def process_que(inpt_list):
 		for tmp_item in tmp_list:
 			if (wait_flag == 0):
 				if (tmp_item["que_state"]["state"] != 0):
-					ready_list.append(tmp_item)
+					tmp_item["que_flag"] = True
+				if (tmp_item["srpm_name"] in block_list):
+					tmp_item["que_flag"] = True
+				ready_list.append(tmp_item)
 			else:
 				wait_list.append(tmp_item)
 		wait_flag = 1
@@ -516,11 +523,10 @@ def sorted_insert(insert_item, input_list):
 	insert_flag = 0
 	
 	for input_item in input_list:
-		if ((input_item[0] < insert_item[0]) or (insert_flag != 0)):
-			final_list.append(input_item)
-		else:
+		if ((insert_item[0] < input_item[0]) and (insert_flag == 0)):
 			final_list.append(insert_item)
 			insert_flag = 1
+		final_list.append(input_item)
 	
 	return final_list
 
@@ -718,11 +724,6 @@ def main(args):
 				if (add_flag != 0):
 					if (len(task_info) < 1):
 						sys.stderr.write("\t" + "[error] TagNotRepo: " + primary_item["name"] + "\n")
-						add_flag = 0
-				
-				if (add_flag != 0):
-					if (primary_item["name"] in conf_opts["excl_list"]):
-						sys.stderr.write("\t" + "[error] package_excluded: " + primary_item["name"] + "\n")
 						add_flag = 0
 				
 				if (add_flag != 0):
@@ -945,7 +946,7 @@ def main(args):
 		    **************************************************************** '''
 		
 		if (loop_flag == 0):
-			(que_ready, que_wait, que_error) = process_que(que_list)
+			(que_ready, que_wait, que_error) = process_que(que_list, conf_opts["excl_list"])
 			
 			sys.stdout.write("[info] Starting inner que loop..." + "\n")
 			
@@ -975,14 +976,15 @@ def main(args):
 							que_wait.pop(0)
 						break
 					else:
-						sorted_que = []
+						que_sort = []
 						while (len(que_error) > 0):
-							sys.stdout.write(("que[e] [-%d/%d]: " % (len(que_error), conf_opts["que_limit"])) + form_info(que_error[0],"task_info") + "\n")
 							init_item = last_root(conf_opts["tag_name"], conf_opts["primary_url"], que_error[0], obj_only=1)
 							if (init_item):
-								sorted_que = sorted_insert([init_item["creation_ts"], que_error[0]], sorted_que)
+								que_sort = sorted_insert([init_item["creation_ts"], que_error[0]], que_sort)
+							else:
+								sys.stdout.write(("que[e] [-%d/%d]: " % (len(que_error), conf_opts["que_limit"])) + form_info(que_error[0],"task_info") + "\n")
 							que_error.pop(0)
-						for que_item in sorted_que:
+						for que_item in que_sort:
 							que_ready.append(que_item[1])
 				
 				''' Get a count of our active tasks '''
