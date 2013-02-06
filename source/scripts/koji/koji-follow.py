@@ -776,6 +776,10 @@ def main(args):
 						
 						sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
 						
+						if (noarch_flag == 0):
+							if (que_item["srpm_name"] in conf_opts["excl_list"]):
+								noarch_flag = 1
+						
 						''' Download all of the noarch rpm files '''
 						
 						if (noarch_flag == 0):
