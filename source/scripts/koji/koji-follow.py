@@ -130,7 +130,7 @@ def rpm_header(file_name, req_rels):
 			if (rpm_header[rpm.RPMTAG_REQUIREFLAGS][x] & rpm.RPMSENSE_EQUAL):
 				req_flag += "="
 			
-			req_epoch = "0"
+			req_epoch = None
 			req_vers = None
 			
 			if (rpm_header[rpm.RPMTAG_REQUIREVERSION][x]):
@@ -271,8 +271,8 @@ def get_pkgs(pkg_name, db_name):
 		(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
 		if (rpm_name != pkg_name):
 			continue
-		if (not rpm_epoch):
-			rpm_epoch = "0"
+		if ((rpm_epoch == 0) or (rpm_epoch == "0") or (rpm_epoch == "None")):
+			rpm_epoch = None
 		
 		if (len(final_list) < 1):
 			pref_list = []
@@ -285,10 +285,9 @@ def get_pkgs(pkg_name, db_name):
 			item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
 			final_list.append(item_info)
 		
-		rpm_epoch = pkg_item[2]
-		if (not rpm_epoch):
-			rpm_epoch = "0"
-		rpm_epoch = str(rpm_epoch)
+		rpm_epoch = str(pkg_item[2])
+		if ((rpm_epoch == 0) or (rpm_epoch == "0") or (rpm_epoch == "None")):
+			rpm_epoch = None
 		item_url = ("%s/%s" % (str(pkg_item[6]), str(pkg_item[7])))
 		item_info = {"name":str(pkg_item[1]), "epoch":rpm_epoch, "version":str(pkg_item[3]), "release":str(pkg_item[4]), "arch":str(pkg_item[5]), "url":item_url}
 		item_info["nvr"] = ("%s-%s-%s" % (item_info["name"], item_info["version"], item_info["release"]))
