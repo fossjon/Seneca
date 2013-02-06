@@ -747,8 +747,8 @@ def main(args):
 					check_list[primary_item["name"]] = {"srpm_name":primary_item["name"], "arch_flag":arch_found, "task_info":task_info}
 		
 		''' **********************************************
-			* Inner processing loop for missing packages *
-			********************************************** '''
+		    * Inner processing loop for missing packages *
+		    ********************************************** '''
 		
 		if (loop_flag == 0):
 			update_time = int(time.time())
@@ -768,8 +768,8 @@ def main(args):
 						noarch_flag = 0
 						
 						''' **************************************************************
-							* Upload, import, tag, and skip any noarch detected packages *
-							************************************************************** '''
+						    * Upload, import, tag, and skip any noarch detected packages *
+						    ************************************************************** '''
 						
 						sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
 						
@@ -834,8 +834,8 @@ def main(args):
 						skip_flag = 1
 				
 				''' *************************************************************************************************
-					* Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
-					************************************************************************************************* '''
+				    * Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
+				    ************************************************************************************************* '''
 				
 				if (skip_flag == 0):
 					srpm_file = os.path.basename(task_info[0]["url"])
@@ -884,8 +884,8 @@ def main(args):
 						skip_flag = 1
 				
 				''' *******************************************************************************************************
-					* Translate any capability or binary package requires to a source package name and append it as a dep *
-					******************************************************************************************************* '''
+				    * Translate any capability or binary package requires to a source package name and append it as a dep *
+				    ******************************************************************************************************* '''
 				
 				if (skip_flag == 0):
 					req_list = map_cap(que_item["cap_list"], primary_repo)
@@ -897,8 +897,8 @@ def main(args):
 					#sys.stderr.write("\t" + "[info] dep_list: " + str(que_item["dep_list"]) + "\n")
 				
 				''' *********************************************************************************
-					* Get the current build status of this package and skip ones that are completed *
-					********************************************************************************* '''
+				    * Get the current build status of this package and skip ones that are completed *
+				    ********************************************************************************* '''
 				
 				if (skip_flag == 0):
 					try:
@@ -916,8 +916,8 @@ def main(args):
 						skip_flag = 1
 				
 				''' **********************************************************************************
-					* Restore any previous que info and add this pkg to the que if all checks passed *
-					********************************************************************************** '''
+				    * Restore any previous que info and add this pkg to the que if all checks passed *
+				    ********************************************************************************** '''
 				
 				if (skip_flag == 0):
 					que_item["que_flag"] = False
