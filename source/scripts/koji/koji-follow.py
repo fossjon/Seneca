@@ -371,7 +371,7 @@ def process_que(inpt_list, block_list):
 			break
 		for tmp_item in tmp_list:
 			if (wait_flag == 0):
-				if (tmp_item["que_state"]["state"] != 0):
+				if (tmp_item["que_state"]["state"] == 0):
 					tmp_item["que_flag"] = True
 				if (tmp_item["srpm_name"] in block_list):
 					tmp_item["que_flag"] = True
@@ -526,6 +526,9 @@ def sorted_insert(insert_item, input_list):
 			final_list.append(insert_item)
 			insert_flag = 1
 		final_list.append(input_item)
+	
+	if (insert_flag == 0):
+		final_list.append(insert_item)
 	
 	return final_list
 
