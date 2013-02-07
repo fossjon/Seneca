@@ -20,7 +20,6 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib
 import urllib2
 
 import bz2
@@ -32,8 +31,12 @@ import string
 import sqlite3
 import xml.dom.minidom
 
+''' ********************
+    * Imported methods *
+    ******************** '''
+
 '''
-	Imported methods from the Koji source code
+	Generate a random path string (Koji source code)
 '''
 
 def _unique_path(prefix):
@@ -47,8 +50,12 @@ def _unique_path(prefix):
     return '%s/%r.%s' % (prefix, time.time(),
                       ''.join([random.choice(string.ascii_letters) for i in range(8)]))
 
+''' ********************************
+    * Local script related methods *
+    ******************************** '''
+
 '''
-	Define some error ignoring methods
+	Print out a data item in string form
 '''
 
 def form_info(data_obj, simple_key):
@@ -59,14 +66,97 @@ def form_info(data_obj, simple_key):
 			out_obj[key_name] = data_obj[key_name][0]
 	return str(out_obj)
 
+'''
+	Read a given config file and parse thru the options
+'''
+
+def conf_file(file_name, old_opts):
+	file_obj = open(file_name, "r")
+	bool_dict = {"None":None,"True":True,"False":False}
+	
+	for line_item in file_obj.readlines():
+		line_item = line_item.replace("\t"," ").replace("\"","'")
+		line_item = line_item.replace("[","<").replace("]",">")
+		line_item = line_item.replace("(","<").replace(")",">")
+		line_item = line_item.strip()
+		
+		if (re.match("^#[ ]*.*$", line_item)):
+			continue
+		
+		opts_key = "" ; opts_val = ""
+		
+		# Boolean
+		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*([A-Z][a-z]+)$", line_item)
+		if (regx_obj):
+			opts_key = regx_obj.group(1) ; opts_val = bool_dict[regx_obj.group(2)]
+		# Integer
+		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*([0-9]+)$", line_item)
+		if (regx_obj):
+			opts_key = regx_obj.group(1) ; opts_val = int(regx_obj.group(2))
+		# String
+		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*'(.+)'$", line_item)
+		if (regx_obj):
+			opts_key = regx_obj.group(1) ; opts_val = regx_obj.group(2)
+		# List of strings
+		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*<'(.+)'>$", line_item)
+		if (regx_obj):
+			list_strip = re.sub("'[ ]*,[ ]*'", "','", regx_obj.group(2))
+			opts_key = regx_obj.group(1) ; opts_val = list_strip.split("','")
+		# OS path expansion
+		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*os.path.expanduser<'(.+)'>$", line_item)
+		if (regx_obj):
+			opts_key = regx_obj.group(1) ; opts_val = os.path.expanduser(regx_obj.group(2))
+		
+		if ((opts_key != "") and (opts_val != "")):
+			old_opts[opts_key] = opts_val
+	
+	file_obj.close()
+	
+	return old_opts
+
+'''
+	Define a db method so other scripts can check our recorded state of packages
+'''
+
+def local_db(rpm_data, pres_time):
+	db_conn = sqlite3.connect(".koji-follow.state.db")
+	db_curs = db_conn.cursor()
+	
+	try:
+		db_curs.execute("CREATE TABLE packages (pkg_name text, pkg_info text, update_time int);")
+	except:
+		pass
+	
+	if (rpm_data):
+		db_curs.execute("DELETE FROM packages WHERE pkg_name = '%s';" % (rpm_data["srpm_name"]))
+		db_curs.execute("INSERT INTO packages VALUES ('%s', \"%s\", %d);" % (rpm_data["srpm_name"], str(rpm_data), pres_time))
+	else:
+		db_curs.execute("DELETE FROM packages WHERE update_time < %d;" % (pres_time))
+	
+	db_conn.commit()
+	db_conn.close()
+
+''' **********************************
+    * General script related methods *
+    ********************************** '''
+
+'''
+	Delete the given filename
+'''
+
 def delete(file_name):
 	if (not file_name):
-		return None
-	sys.stderr.write("[info] delete: " + file_name + "\n")
+		return 1
+	sys.stderr.write("\t" + "[info] delete: " + file_name + "\n")
 	try:
 		os.unlink(file_name)
 	except:
 		pass
+	return 0
+
+'''
+	Clear the rpmbuild folder structure
+'''
 
 def wipe_tree():
 	rpmb_dir = os.path.expanduser("~/rpmbuild")
@@ -89,19 +179,75 @@ def wipe_tree():
 '''
 
 def download_file(url_str, file_name):
-	if (os.path.exists(file_name)):
-		return 0
+	if (file_name):
+		if (os.path.exists(file_name)):
+			return 0
 	
 	sys.stderr.write("\t" + "[info] downloading: " + ("[%s] -> [%s]" % (url_str, file_name)) + "\n")
 	
 	try:
-		urllib.urlretrieve(url_str, file_name)
+		url_obj = urllib2.urlopen(url_str)
+		if (file_name):
+			file_obj = open(file_name, "w")
+		else:
+			data_str = ""
+		
+		while (1):
+			read_data = url_obj.read(8192)
+			if (not read_data):
+				break
+			if (file_name):
+				file_obj.write(read_data)
+			else:
+				data_str += read_data
+		
+		if (file_name):
+			file_obj.close()
+		else:
+			return data_str
+		url_obj.close()
 	
 	except:
 		sys.stderr.write("\t" + "[error] download" + "\n")
 		return 1
 	
 	return 0
+
+'''
+	Build a source rpm file based on a given spec file
+'''
+
+def rebuild_srpm(arch_name, rpm_spec, rand_rels):
+	if (rand_rels == True):
+		try:
+			file_obj = open(rpm_spec, "r")
+			line_list = file_obj.readlines()
+			file_obj.close()
+			rels_flag = 0
+			file_obj = open(rpm_spec, "w")
+			for line_item in line_list:
+				tmp_line = line_item.replace("\t"," ").strip()
+				regx_obj = re.match("^Release: .*$", tmp_line, re.I)
+				if ((regx_obj) and (rels_flag == 0)):
+					tmp_line = re.sub("\.[0-9]+kf$", "", tmp_line)
+					line_item = ("%s.%skf\n" % (tmp_line, time.strftime("%y%m%d%H%M")))
+					rels_flag = 1
+				file_obj.write(line_item)
+			file_obj.close()
+		except:
+			sys.stderr.write("\t" + "[error] rpm_spec: " + spec_file + "\n")
+			return ""
+	try:
+		srpm_out = subprocess.check_output(["/usr/bin/rpmbuild", "-bs", "--target", arch_name, rpm_spec], stderr=subprocess.STDOUT)
+		for out_line in srpm_out.split("\n"):
+			out_line = out_line.replace("\t"," ").strip()
+			regx_obj = re.match("^wrote: [ ]*(.*)$", out_line, re.I)
+			if (regx_obj):
+				return regx_obj.group(1)
+	except:
+		sys.stderr.write("\t" + "[error] rpm_build: " + spec_file + "\n")
+	return ""
+
 
 '''
 	Loop thru the given rpm file headers and return any listed package requirements
@@ -164,6 +310,9 @@ def decomp_file(file_name):
 	
 	if (comp_obj):
 		plain_name = re.sub("\.[bg]z[0-9A-Za-z]*$", "", file_name)
+		
+		sys.stderr.write("\t" + "[info] decompressing: " + ("[%s] -> [%s]" % (file_name, plain_name)) + "\n")
+		
 		file_obj = open(plain_name, "wb")
 		
 		while (1):
@@ -186,11 +335,9 @@ def decomp_file(file_name):
 def get_repodata(koji_url, arch_name, target_name, file_name):
 	try:
 		repodata_url = ("%s/repos/%s/latest/%s/repodata/repomd.xml" % (koji_url, target_name, arch_name))
-		url_obj = urllib2.urlopen(repodata_url)
-		url_data = url_obj.read().replace("\0","").replace("\t","").replace("\r","").replace("\n","")
-		url_obj.close()
+		url_data = download_file(repodata_url, "").replace("\0","").replace("\t","").replace("\r","").replace("\n","").replace("\"","'")
 		
-		reg_obj = re.match("^.*['\"]([^'\"]*primary.sqlite[^'\"]*)['\"].*$", url_data, re.I)
+		reg_obj = re.match("^.*'([^']*primary.sqlite[^']*)'.*$", url_data, re.I)
 		repo_file = reg_obj.group(1)
 		package_url = ("%s/repos/%s/latest/%s/%s" % (koji_url, target_name, arch_name, repo_file))
 	
@@ -199,6 +346,7 @@ def get_repodata(koji_url, arch_name, target_name, file_name):
 		return ""
 	
 	repofile_name = os.path.basename(repo_file)
+	delete(repofile_name)
 	if (download_file(package_url, repofile_name) != 0):
 		sys.stderr.write("\t" + "[error] repodata_db: " + package_url + "\n")
 		return ""
@@ -234,8 +382,8 @@ def map_cap(cap_list, db_name):
 			except:
 				db_list = []
 			for pkg_item in db_list:
-				name_list = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
-				cap_name = name_list[0]
+				(rpm_name, rpm_vers, rpm_rels, rpm_epoch, rpm_arch) = rpmUtils.miscutils.splitFilename(str(pkg_item[0]))
+				cap_name = rpm_name
 		cap_list[x][0] = cap_name
 	
 	db_conn.close()
@@ -300,6 +448,10 @@ def get_pkgs(pkg_name, db_name):
 	
 	return (arch_flag, final_list)
 
+''' ************************
+    * Koji related methods *
+    ************************ '''
+
 '''
 	Get the latest build state for a given package nvr
 '''
@@ -315,19 +467,19 @@ def koji_state(pkg_nvr, koji_obj):
 		
 		try:
 			build_info["state"] = tmp_info["state"]
+			if ((build_info["state"] != 0) and (build_info["state"] != 1)):
+				build_info["state"] = -3
 		except:
 			build_info["state"] = -4
-		
-		if ((build_info["state"] != 0) and (build_info["state"] != 1)):
-			build_info["state"] = -3
 		
 		try:
 			build_info["task_id"] = tmp_info["task_id"]
 		except:
-			build_info["task_id"] = -2
+			build_info["task_id"] = -3
 	
 	except:
 		build_info["state"] = -2
+		build_info["task_id"] = -2
 	
 	build_info["sent_nvr"] = pkg_nvr
 	
@@ -397,29 +549,21 @@ def proc_error(info_obj, koji_obj):
 		
 		if (not "id" in task_obj.keys()):
 			return final_list
-		child_list = koji_obj.listTasks(opts={"parent":task_obj["id"]}, queryOpts={"limit":8})
+		child_list = koji_obj.listTasks(opts={"parent":task_obj["id"]}, queryOpts={"limit":4})
 		
 		for child_task in child_list:
 			if (not "id" in child_task.keys()):
 				continue
 			log_list = koji_obj.downloadTaskOutput(child_task["id"], "root.log")
 			
-			error_flag = 0
 			for log_line in log_list.split("\n"):
-				log_line = log_line.strip()
-				if ((error_flag == 1) and ("Requires: " in log_line)):
-					log_line = log_line.replace("<"," ").replace("["," ").replace("{"," ").replace("("," ")
-					log_line = log_line.replace(">"," ").replace("]"," ").replace("}"," ").replace(")"," ")
-					log_line = log_line.replace("="," ")
-					log_line = re.sub("^.*Requires: [ ]*", "", log_line)
-					log_line = re.sub(" .*$", "", log_line)
-					if ((log_line) and (not log_line in final_list)):
-						final_list.append(log_line)
-					error_flag = 2
-				elif ("Error: Package: " in log_line):
-					error_flag = 1
-				else:
-					error_flag = 0
+				log_line = log_line.replace("\t"," ").strip()
+				log_line = re.sub("\(.*$", "", log_line)
+				if (" Error: Package: " in log_line):
+					regx_obj = re.match("^.* Error: Package: (.*)-[^-]+-[^-]+$", log_line, re.I)
+					if (regx_obj):
+						pkg_name = re.sub("^[0-9]+:", "", regx_obj.group(1))
+						final_list.append([pkg_name.strip()])
 	
 	except:
 		pass
@@ -555,77 +699,80 @@ def que_build(target, que_obj, koji_obj):
 	return 0
 
 '''
-	Read a given config file and parse thru the options
+	Upload, import, tag, and skip any noarch detected packages
 '''
 
-def conf_file(file_name, old_opts):
-	file_obj = open(file_name, "r")
-	bool_dict = {"None":None,"True":True,"False":False}
+def import_noarch(que_item, block_list, koji_tag, koji_obj):
+	noarch_flag = 0
+	task_info = que_item["task_info"]
+	dev_null = open("/dev/null", "r+")
 	
-	for line_item in file_obj.readlines():
-		line_item = line_item.replace("\t"," ").replace("\"","'")
-		line_item = line_item.replace("[","<").replace("]",">")
-		line_item = line_item.replace("(","<").replace(")",">")
-		line_item = line_item.strip()
-		
-		if (re.match("^#[ ]*.*$", line_item)):
-			continue
-		
-		opts_key = "" ; opts_val = ""
-		
-		# Boolean
-		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*([A-Z][a-z]+)$", line_item)
-		if (regx_obj):
-			opts_key = regx_obj.group(1) ; opts_val = bool_dict[regx_obj.group(2)]
-		# Integer
-		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*([0-9]+)$", line_item)
-		if (regx_obj):
-			opts_key = regx_obj.group(1) ; opts_val = int(regx_obj.group(2))
-		# String
-		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*'(.+)'$", line_item)
-		if (regx_obj):
-			opts_key = regx_obj.group(1) ; opts_val = regx_obj.group(2)
-		# List of strings
-		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*<'(.+)'>$", line_item)
-		if (regx_obj):
-			list_strip = re.sub("'[ ]*,[ ]*'", "','", regx_obj.group(2))
-			opts_key = regx_obj.group(1) ; opts_val = list_strip.split("','")
-		# OS path expansion
-		regx_obj = re.match("^([^ ]+)[ ]*=[ ]*os.path.expanduser<'(.+)'>$", line_item)
-		if (regx_obj):
-			opts_key = regx_obj.group(1) ; opts_val = os.path.expanduser(regx_obj.group(2))
-		
-		if ((opts_key != "") and (opts_val != "")):
-			old_opts[opts_key] = opts_val
+	sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
 	
-	file_obj.close()
+	if (noarch_flag == 0):
+		if (que_item["srpm_name"] in block_list):
+			sys.stderr.write("\t" + "[error] noarch_excluded" + "\n")
+			noarch_flag = 1
 	
-	return old_opts
+	''' Download all of the noarch rpm files '''
+	
+	if (noarch_flag == 0):
+		for pkg_item in task_info:
+			rpm_file = os.path.basename(pkg_item["url"])
+			if (download_file(pkg_item["url"], rpm_file) != 0):
+				noarch_flag = 1
+				break
+			if (subprocess.call(["/bin/rpm", "-K", rpm_file], stdout=dev_null, stderr=subprocess.STDOUT) != 0):
+				sys.stderr.write("\t" + "[error] noarch_verify: " + ("[%s] -> [%s]" % (pkg_item["url"], rpm_file)) + "\n")
+				noarch_flag = 1
+				break
+	
+	''' Upload and import the related rpm files '''
+	
+	if (noarch_flag == 0):
+		for y in range(0, 2):
+			for pkg_item in task_info:
+				if ((y == 0) and (pkg_item["arch"] != "src")):
+					continue
+				if ((y != 0) and (pkg_item["arch"] == "src")):
+					continue
+				
+				pres_dir = os.getcwd()
+				rpm_name = os.path.basename(pkg_item["url"])
+				file_path = ("%s/%s" % (pres_dir, rpm_name))
+				server_dir = _unique_path("cli-import")
+				
+				#sys.stderr.write("\t" + "[info] import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
+				
+				try:
+					koji_obj.uploadWrapper(file_path, server_dir)
+					try:
+						koji_obj.importRPM(server_dir, rpm_name)
+					except:
+						sys.stderr.write("\t" + "[error] noarch_import: " + ("[%s] -> [%s]" % (server_dir, rpm_name)) + "\n")
+				except:
+					sys.stderr.write("\t" + "[error] noarch_upload: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
+	
+	''' Tag the source rpm name '''
+	
+	if (noarch_flag == 0):
+		for pkg_item in task_info:
+			if (pkg_item["arch"] == "src"):
+				#sys.stderr.write("\t" + "[info] tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
+				
+				try:
+					koji_obj.tagBuild(koji_tag, pkg_item["nvr"])
+				except:
+					sys.stderr.write("\t" + "[error] noarch_tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
+	
+	dev_null.close()
+
+''' *****************************
+    * Primary execution methods *
+    ***************************** '''
 
 '''
-	Define a db method so other scripts can check our recorded state of packages
-'''
-
-def local_db(rpm_data, pres_time):
-	db_conn = sqlite3.connect(".koji-follow.state.db")
-	db_curs = db_conn.cursor()
-	
-	try:
-		db_curs.execute("CREATE TABLE packages (pkg_name text, pkg_info text, update_time int);")
-	except:
-		pass
-	
-	if (rpm_data):
-		db_curs.execute("DELETE FROM packages WHERE pkg_name = '%s';" % (rpm_data["srpm_name"]))
-		db_curs.execute("INSERT INTO packages VALUES ('%s', \"%s\", %d);" % (rpm_data["srpm_name"], str(rpm_data), pres_time))
-	else:
-		db_curs.execute("DELETE FROM packages WHERE update_time < %d;" % (pres_time))
-	
-	db_conn.commit()
-	db_conn.close()
-
-'''
-	The main method containing the continuous primary task check/watch loop
+	The main method containing the continuous package version check/watch loop
 '''
 
 def main(args):
@@ -654,7 +801,7 @@ def main(args):
 			for que_key in que_list.keys():
 				que_list[que_key]["que_flag"] = False
 		
-		#list all of the *un-used/needed* files in the pwd and delete them
+		#delete any of the un-needed/un-used files in the pwd
 		
 		''' *******************************************************************************************************
 		    * Download the latest repodata files so we can process packages and convert any "BuildRequires" names *
@@ -669,7 +816,6 @@ def main(args):
 				
 				try:
 					primary_repo = ("primary.%s.db" % (release_info["build_tag_name"]))
-					delete(primary_repo)
 					primary_repo = get_repodata(conf_opts["primary_url"], conf_opts["primary_arch"], release_info["build_tag_name"], primary_repo)
 					
 					if (not os.path.exists(primary_repo)):
@@ -706,12 +852,12 @@ def main(args):
 				sys.stderr.write("\t" + "[error] latest_tagged" + "\n")
 				loop_flag = 1
 		
-		''' *******************************************************************
-		    * Compare each pkg ENVR and record any items that are out of date *
-		    ******************************************************************* '''
+		''' **********************************************************************
+		    * Compare each pkg version and record any items that are out of date *
+		    ********************************************************************** '''
 		
 		if (loop_flag == 0):
-			check_list = {}
+			check_list = {} ; extra_list = []
 			x = 0 ; l = len(primary_tags)
 			
 			for primary_item in primary_tags:
@@ -726,24 +872,75 @@ def main(args):
 				
 				if (add_flag != 0):
 					primary_item = task_info[0]
-					
-					#sys.stderr.write("[info] checking: " + ("[%d/%d]: " % (x, l)) + str(primary_item) + "\n")
-					
 					if (not primary_item["name"] in secondary_dic.keys()):
 						add_flag = 2
-					
 					else:
 						secondary_item = secondary_dic[primary_item["name"]]
-						
 						if (len(primary_item.keys()) > 3):
 							evr_alpha = (str(secondary_item["epoch"]), secondary_item["version"], secondary_item["release"])
 							evr_beta = (str(primary_item["epoch"]), primary_item["version"], primary_item["release"])
-							
 							if (rpm.labelCompare(evr_alpha, evr_beta) < 0):
 								add_flag = 2
+					pre_list = []
 				
 				if (add_flag == 2):
-					check_list[primary_item["name"]] = {"srpm_name":primary_item["name"], "arch_flag":arch_found, "task_info":task_info}
+					try:
+						state_info = koji_state(primary_item["nvr"], secondary_obj)
+						if (state_info["state"] == 1):
+							sys.stderr.write("\t" + "[info] build_completed: " + primary_item["nvr"] + "\n")
+							add_flag = 0
+							#tag the package envr
+						elif (state_info["state"] == -3):
+							error_list = proc_error(state_info, secondary_obj)
+							prio_list = map_cap(error_list, primary_repo)
+							for prio_item in prio_list:
+								pre_list.append(prio_item[0])
+							if (len(pre_list) > 0):
+								extra_list.append(["error",pre_list])
+					except:
+						sys.stderr.write("\t" + "[error] koji_state: " + primary_item["nvr"] + "\n")
+						add_flag = 0
+				
+				if (add_flag == 2):
+					que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":pre_list, "prio_flag":False}
+					sys.stderr.write("[info] adding: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
+					if (arch_found == False):
+						extra_list.append(["noarch",que_item])
+					else:
+						check_list[primary_item["name"]] = que_item
+		
+		''' ***********************************************
+		    * Process any noarch or error tagged packages *
+		    *********************************************** '''
+		
+		if (loop_flag == 0):
+			try:
+				secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
+				secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
+			except:
+				sys.stderr.write("\t" + "[error] noarch_login" + "\n")
+				loop_flag = 1
+		
+		if (loop_flag == 0):
+			seen_list = []
+			for extra_item in extra_list:
+				if (extra_item[0] == "noarch"):
+					import_noarch(extra_item[1], conf_opts["excl_list"], conf_opts["tag_name"], secondary_obj)
+				elif (extra_item[0] == "error"):
+					for pre_item in extra_item[1]:
+						if (pre_item in seen_list):
+							continue
+						for primary_item in primary_tags:
+							if (primary_item["name"] != pre_item):
+								continue
+							(arch_found, task_info) = get_pkgs(primary_item["name"], primary_repo)
+							if (len(task_info) < 1):
+								continue
+							primary_item = task_info[0]
+							state_info = koji_state(primary_item["nvr"], secondary_obj)
+							que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":[], "prio_flag":True}
+							check_list[primary_item["name"]] = que_item
+						seen_list.append(pre_item)
 		
 		''' **********************************************
 		    * Inner processing loop for missing packages *
@@ -760,80 +957,6 @@ def main(args):
 				task_info = que_item["task_info"]
 				
 				sys.stderr.write("[info] processing: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
-				
-				if (skip_flag == 0):
-					if (que_item["arch_flag"] == False):
-						noarch_flag = 0
-						
-						''' **************************************************************
-						    * Upload, import, tag, and skip any noarch detected packages *
-						    ************************************************************** '''
-						
-						sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
-						
-						if (noarch_flag == 0):
-							if (que_item["srpm_name"] in conf_opts["excl_list"]):
-								noarch_flag = 1
-						
-						''' Download all of the noarch rpm files '''
-						
-						if (noarch_flag == 0):
-							for pkg_item in task_info:
-								rpm_file = os.path.basename(pkg_item["url"])
-								if (download_file(pkg_item["url"], rpm_file) != 0):
-									noarch_flag = 1
-									break
-								#check the integrity of the rpm file
-						
-						''' Login and authenticate to the Koji server '''
-						
-						if (noarch_flag == 0):
-							try:
-								secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
-								secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
-							except:
-								sys.stderr.write("\t" + "[error] noarch_login" + "\n")
-								noarch_flag = 1
-						
-						''' Upload and import the related rpm files '''
-						
-						if (noarch_flag == 0):
-							for y in range(0, 2):
-								for pkg_item in task_info:
-									if ((y == 0) and (pkg_item["arch"] != "src")):
-										continue
-									if ((y != 0) and (pkg_item["arch"] == "src")):
-										continue
-									
-									pres_dir = os.getcwd()
-									rpm_name = os.path.basename(pkg_item["url"])
-									file_path = ("%s/%s" % (pres_dir, rpm_name))
-									server_dir = _unique_path("cli-import")
-									
-									#sys.stderr.write("\t" + "[info] import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
-									
-									try:
-										secondary_obj.uploadWrapper(file_path, server_dir)
-										try:
-											secondary_obj.importRPM(server_dir, rpm_name)
-										except:
-											sys.stderr.write("\t" + "[error] noarch_import: " + ("[%s] -> [%s]" % (server_dir, rpm_name)) + "\n")
-									except:
-										sys.stderr.write("\t" + "[error] noarch_upload: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
-						
-						''' Tag the source rpm name '''
-						
-						if (noarch_flag == 0):
-							for pkg_item in task_info:
-								if (pkg_item["arch"] == "src"):
-									#sys.stderr.write("\t" + "[info] tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
-									
-									try:
-										secondary_obj.tagBuild(conf_opts["tag_name"], pkg_item["nvr"])
-									except:
-										sys.stderr.write("\t" + "[error] noarch_tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
-						
-						skip_flag = 1
 				
 				''' *************************************************************************************************
 				    * Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
@@ -859,21 +982,13 @@ def main(args):
 							spec_path = os.path.expanduser("~/rpmbuild/SPECS")
 							spec_list = os.listdir(spec_path)
 							spec_file = (spec_path + "/" + spec_list[0])
+							rpmb_file = rebuild_srpm(conf_opts["target_arch"], spec_file, que_item["prio_flag"])
 							
-							try:
-								srpm_out = subprocess.check_output(["/usr/bin/rpmbuild", "-bs", "--target", conf_opts["target_arch"], spec_file], stderr=subprocess.STDOUT)
-								
-								for out_line in srpm_out.split("\n"):
-									out_line = out_line.strip()
-									if (out_line[:7].lower() == "wrote: "):
-										srpm_file = out_line[7:]
-								
-								#sys.stderr.write("\t" + "[info] rpm_build: " + ("([%s] [%s]) -> [%s]" % (conf_opts["target_arch"], spec_file, srpm_file)) + "\n")
-								
-								rpm_info = rpm_header(srpm_file, None)
+							if (rpmb_file):
+								rpm_info = rpm_header(rpmb_file, None)
 								que_item["cap_list"] = rpm_info[1]
 							
-							except:
+							else:
 								sys.stderr.write("\t" + "[error] rpm_build: " + ("[%s] -> [%s]" % (spec_file, srpm_file)) + "\n")
 								skip_flag = 1
 						
@@ -891,35 +1006,13 @@ def main(args):
 				
 				if (skip_flag == 0):
 					req_list = map_cap(que_item["cap_list"], primary_repo)
-					que_item["cap_list"] = [] ; que_item["dep_list"] = []
-					
+					que_item["cap_list"] = []
 					for req_item in req_list:
 						que_item["dep_list"].append(req_item[0])
-					
-					#sys.stderr.write("\t" + "[info] dep_list: " + str(que_item["dep_list"]) + "\n")
 				
-				''' *********************************************************************************
-				    * Get the current build status of this package and skip ones that are completed *
-				    ********************************************************************************* '''
-				
-				if (skip_flag == 0):
-					try:
-						secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
-						que_item["que_state"] = koji_state(task_info[0]["nvr"], secondary_obj)
-						
-						#sys.stderr.write("\t" + "[info] build_state: " + str(que_item["que_state"]) + "\n")
-						
-						if (que_item["que_state"]["state"] == 1):
-							sys.stderr.write("\t" + "[info] build_complete" + "\n")
-							skip_flag = 1
-					
-					except:
-						sys.stderr.write("\t" + "[error] koji_state: " + task_info[0]["nvr"] + "\n")
-						skip_flag = 1
-				
-				''' **********************************************************************************
-				    * Restore any previous que info and add this pkg to the que if all checks passed *
-				    ********************************************************************************** '''
+				''' **************************************************************
+				    * Restore any previous que info to prevent redundant actions *
+				    ************************************************************** '''
 				
 				if (skip_flag == 0):
 					que_item["que_flag"] = False
@@ -934,7 +1027,29 @@ def main(args):
 							que_item["que_flag"] = False
 						if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
 							que_item["que_flag"] = False
-					
+				
+				''' *************************************************************************************
+				    * Process any packages marked as a priority and clear any flags that would block it *
+				    ************************************************************************************* '''
+				
+				if (skip_flag == 0):
+					if (que_item["prio_flag"] == True):
+						que_item["que_flag"] = False
+						que_item["cap_list"] = []
+						que_item["dep_list"] = []
+						task_info[0]["url"] = rpmb_file
+						srpm_file = os.path.basename(task_info[0]["url"])
+						try:
+							shutil.copyfile(task_info[0]["url"], srpm_file)
+						except:
+							sys.stderr.write("\t" + "[error] rpm_copy: " + ("[%s] -> [%s]" % (task_info[0]["url"], srpm_file)) + "\n")
+							skip_flag = 1
+				
+				''' *******************************************************************************
+				    * Append this que item, set any last minute flags, and write it out to the db *
+				    ******************************************************************************* '''
+				
+				if (skip_flag == 0):
 					if (que_item["que_state"]["state"] == 0):
 						que_item["que_flag"] = True
 					if (que_item["srpm_name"] in conf_opts["excl_list"]):
@@ -1000,8 +1115,8 @@ def main(args):
 				''' Get a count of our active tasks '''
 				
 				try:
-					secondary_tasks = secondary_obj.listTasks(opts={"state":[0,1], "method":"build"}, queryOpts={"limit":900})
-					#list my tasks only
+					user_info = secondary_obj.getLoggedInUser()
+					secondary_tasks = secondary_obj.listTasks(opts={"state":[0,1], "method":"build", "owner":user_info["id"]}, queryOpts={"limit":900})
 					que_length = len(secondary_tasks)
 					if (que_length >= conf_opts["que_limit"]):
 						raise NameError("TooManyTasks")
