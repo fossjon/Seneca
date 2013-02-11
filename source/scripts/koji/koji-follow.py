@@ -186,11 +186,11 @@ def download_file(url_str, file_name):
 	sys.stderr.write("\t" + "[info] downloading: " + ("[%s] -> [%s]" % (url_str, file_name)) + "\n")
 	
 	try:
-		url_obj = urllib2.urlopen(url_str)
 		if (file_name):
 			file_obj = open(file_name, "w")
 		else:
 			data_str = ""
+		url_obj = urllib2.urlopen(url_str)
 		
 		while (1):
 			read_data = url_obj.read(8192)
@@ -201,11 +201,11 @@ def download_file(url_str, file_name):
 			else:
 				data_str += read_data
 		
+		url_obj.close()
 		if (file_name):
 			file_obj.close()
 		else:
 			return data_str
-		url_obj.close()
 	
 	except:
 		sys.stderr.write("\t" + "[error] download" + "\n")
@@ -889,7 +889,6 @@ def main(args):
 						if (state_info["state"] == 1):
 							sys.stderr.write("\t" + "[info] build_completed: " + primary_item["nvr"] + "\n")
 							add_flag = 0
-							#tag the package envr
 						elif (state_info["state"] == -3):
 							error_list = proc_error(state_info, secondary_obj)
 							prio_list = map_cap(error_list, primary_repo)
@@ -1034,7 +1033,6 @@ def main(args):
 				
 				if (skip_flag == 0):
 					if (que_item["prio_flag"] == True):
-						que_item["que_flag"] = False
 						que_item["cap_list"] = []
 						que_item["dep_list"] = []
 						task_info[0]["url"] = rpmb_file
