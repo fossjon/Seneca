@@ -1,12 +1,12 @@
 #!/usr/bin/python
 
-# Version: 1.4
-# Date: 06/02/2013 (dd/mm/yyyy)
+# Version: 1.5
+# Date: 13/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 #
 # Execution notes (*you must*):
 #
-# - Allow and add any new package names for the given build tag
+# - Allow and add any new package names to the given build tag
 # - Resolve any circular dependency package issues
 
 '''
@@ -673,32 +673,6 @@ def sorted_insert(insert_item, input_list):
 	return final_list
 
 '''
-	Que a package to be built
-'''
-
-def que_build(target, que_obj, koji_obj):
-	pres_dir = os.getcwd()
-	rpm_name = os.path.basename(que_obj["task_info"][0]["url"])
-	file_path = ("%s/%s" % (pres_dir, rpm_name))
-	server_dir = _unique_path("cli-build")
-	opts = {}
-	
-	sys.stdout.write("\t" + "[info] que_build: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
-	
-	try:
-		callback = None ; koji_obj.uploadWrapper(file_path, server_dir, callback=callback)
-		server_dir = ("%s/%s" % (server_dir, os.path.basename(file_path)))
-		try:
-			priority = None ; koji_obj.build(server_dir, target, opts, priority=priority)
-			return 1
-		except:
-			sys.stderr.write("\t" + "[error] build_que" + "\n")
-	except:
-		sys.stderr.write("\t" + "[error] build_upload" + "\n")
-	
-	return 0
-
-'''
 	Upload, import, tag, and skip any noarch detected packages
 '''
 
@@ -766,6 +740,32 @@ def import_noarch(que_item, block_list, koji_tag, koji_obj):
 					sys.stderr.write("\t" + "[error] noarch_tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
 	
 	dev_null.close()
+
+'''
+	Que a package to be built
+'''
+
+def que_build(target, que_obj, koji_obj):
+	pres_dir = os.getcwd()
+	rpm_name = os.path.basename(que_obj["task_info"][0]["url"])
+	file_path = ("%s/%s" % (pres_dir, rpm_name))
+	server_dir = _unique_path("cli-build")
+	opts = {}
+	
+	sys.stdout.write("\t" + "[info] que_build: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
+	
+	try:
+		koji_obj.uploadWrapper(file_path, server_dir, callback=None)
+		server_dir = ("%s/%s" % (server_dir, os.path.basename(file_path)))
+		try:
+			koji_obj.build(server_dir, target, opts, priority=5)
+			return 1
+		except:
+			sys.stderr.write("\t" + "[error] build_que" + "\n")
+	except:
+		sys.stderr.write("\t" + "[error] build_upload" + "\n")
+	
+	return 0
 
 ''' *****************************
     * Primary execution methods *
@@ -1052,16 +1052,15 @@ def main(args):
 						que_item["que_flag"] = True
 					if (que_item["srpm_name"] in conf_opts["excl_list"]):
 						que_item["que_flag"] = True
-					
 					sys.stderr.write("\t" + "[info] processed: " + form_info(que_item,"task_info") + "\n")
-					
 					que_list[check_key] = que_item
-					local_db(que_item, update_time)
 			
 			for que_key in que_list.keys():
 				if (not que_key in check_list.keys()):
 					del que_list[que_key]
 			
+			for que_key in que_list.keys():
+				local_db(que_list[que_key], update_time)
 			local_db(None, update_time)
 		
 		''' ****************************************************************
