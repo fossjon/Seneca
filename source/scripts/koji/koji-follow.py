@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# Version: 1.5
-# Date: 13/02/2013 (dd/mm/yyyy)
+# Version: 1.6
+# Date: 14/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 #
 # Execution notes (*you must*):
@@ -867,7 +867,7 @@ def main(args):
 				
 				if (add_flag != 0):
 					if (len(task_info) < 1):
-						sys.stderr.write("\t" + "[error] TagNotRepo: " + primary_item["name"] + "\n")
+						sys.stderr.write("[error]: " + ("[%d/%d] tag_not_repo: " % (x, l)) + primary_item["name"] + "\n")
 						add_flag = 0
 				
 				if (add_flag != 0):
@@ -887,7 +887,7 @@ def main(args):
 					try:
 						state_info = koji_state(primary_item["nvr"], secondary_obj)
 						if (state_info["state"] == 1):
-							sys.stderr.write("\t" + "[info] build_completed: " + primary_item["nvr"] + "\n")
+							sys.stderr.write("[info]: " + ("[%d/%d] build_completed: " % (x, l)) + primary_item["nvr"] + "\n")
 							add_flag = 0
 						elif (state_info["state"] == -3):
 							error_list = proc_error(state_info, secondary_obj)
@@ -897,12 +897,12 @@ def main(args):
 							if (len(pre_list) > 0):
 								extra_list.append(["error",pre_list])
 					except:
-						sys.stderr.write("\t" + "[error] koji_state: " + primary_item["nvr"] + "\n")
+						sys.stderr.write("[error]: " + ("[%d/%d] koji_state: " % (x, l)) + primary_item["nvr"] + "\n")
 						add_flag = 0
 				
 				if (add_flag == 2):
 					que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":pre_list, "prio_flag":False}
-					sys.stderr.write("[info] adding: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
+					sys.stderr.write("[info]: " + ("[%d/%d] adding: " % (x, l)) + primary_item["nvr"] + "\n")
 					if (arch_found == False):
 						extra_list.append(["noarch",que_item])
 					else:
