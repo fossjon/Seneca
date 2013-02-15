@@ -571,87 +571,51 @@ def proc_error(info_obj, koji_obj):
 	return final_list
 
 '''
-	Attempt to find the original build root environment and the release version of the deps installed
+	Attempt to find either the first or latest build attempt for a given pkg name
 '''
 
-def last_root(koji_tag, koji_url, pkg_item, obj_only=0):
+def build_item(pkg_name, koji_tag, koji_obj, init_item=True):
+	final_item = None
+	
 	try:
-		koji_obj = koji.ClientSession("%s/kojihub" % (koji_url))
-		search_list = koji_obj.search(pkg_item["srpm_name"], "package", "glob")
+		search_list = koji_obj.search(pkg_name, "package", "glob")
 	except:
 		search_list = []
 	
 	if (len(search_list) == 1):
-		last_build = None
-		tag_numb = re.sub("[^0-9]", "", koji_tag)
 		try:
 			build_list = koji_obj.listBuilds(packageID=search_list[0]["id"])
 		except:
 			build_list = []
-		for build_item in build_list:
-			if (build_item["state"] != 1):
-				continue
-			rels_list = build_item["release"].split(".")
-			while (len(rels_list) > 1):
-				rels_list.pop(0)
-			if (len(rels_list) > 0):
-				rels_list[0] = re.sub("[^0-9]", "", rels_list[0])
-				if (rels_list[0] == tag_numb):
-					if (not last_build):
-						last_build = build_item
-					elif (build_item["creation_ts"] < last_build["creation_ts"]):
-						last_build = build_item
 		
-		if (obj_only == 1):
-			return last_build
-		
-		if (last_build):
+		for build_info in build_list:
 			try:
-				log_path = koji.pathinfo.build_logs(last_build)
+				tag_list = koji_obj.listTags(build_info["nvr"])
 			except:
-				log_path = ""
-			log_path = log_path.strip("/").split("/")
-			if (len(log_path) > 2):
-				log_path.pop(0) ; log_path.pop(0)
-			log_path = "/".join(log_path)
+				tag_list = []
 			
-			prev_tag = (int(tag_numb) - 1)
+			if (init_item == True):
+				if (build_info["state"] != 1):
+					continue
+				for tag_item in tag_list:
+					if (tag_item["name"] == koji_tag):
+						if (not final_item):
+							final_item = build_info
+						elif (build_info["creation_ts"] < final_item["creation_ts"]):
+							final_item = build_info
 			
-			arch_list = []
-			try:
-				child_list = koji_obj.getTaskChildren(last_build["task_id"])
-			except:
-				child_list = []
-			for child_item in child_list:
-				for arch_item in [child_item["arch"], child_item["label"]]:
-					if ((arch_item == "srpm") or (arch_item == "noarch") or (arch_item == "tag")):
-						continue
-					if (arch_item in arch_list):
-						continue
-					arch_list.append(arch_item)
-			
-			for arch_item in arch_list:
-				last_rels = []
-				yum_flag = 0
-				try:
-					log_list = urllib.urlopen("%s/%s/%s/root.log" % (koji_url, log_path, arch_item)).readlines()
-				except:
-					log_list = []
-				for log_line in log_list:
-					log_line = log_line.replace("\t"," ").strip()
-					if (yum_flag == 1):
-						for dep_name in pkg_item["dep_list"]:
-							regx_obj = re.match("^.* ([^ ]+)[ ]+[^ ]+[ ]+[^ ]+\.fc%d .*$" % (prev_tag), log_line)
-							if ((regx_obj) and (regx_obj.group(1) == dep_name) and (not dep_name in last_rels)):
-								last_rels.append(dep_name)
-					if (re.match("^.*package[ ]+arch[ ]+version.*$", log_line, re.I)):
-						yum_flag = 1
-					if (re.match("^.*transaction[ ]+summary.*$", log_line, re.I)):
-						yum_flag = 0
-				if (len(last_rels) == len(pkg_item["dep_list"])):
-					return True
+			else:
+				tag_numb = re.sub("[^0-9]", "", koji_tag)
+				regx_end = re.match("^.*\.fc%s$" % (tag_numb), build_info["release"], re.I)
+				regx_mid = re.match("^.*\.fc%s\..*$" % (tag_numb), build_info["release"], re.I)
+				if ((not regx_end) and (not regx_mid)):
+					continue
+				if (not final_item):
+					final_item = build_info
+				elif (build_info["creation_ts"] > final_item["creation_ts"]):
+					final_item = build_info
 	
-	return False
+	return final_item
 
 '''
 	Insert a qued pkg item in order related to when it was built
@@ -797,6 +761,8 @@ def main(args):
 		loop_flag = 0
 		conf_opts = conf_file(sys.argv[1], conf_opts)
 		
+		sys.stderr.write("[info] Starting outer check loop..." + "\n")
+		
 		if (conf_opts["retry_flag"] == True):
 			for que_key in que_list.keys():
 				que_list[que_key]["que_flag"] = False
@@ -867,7 +833,7 @@ def main(args):
 				
 				if (add_flag != 0):
 					if (len(task_info) < 1):
-						sys.stderr.write("[error]: " + ("[%d/%d] tag_not_repo: " % (x, l)) + primary_item["name"] + "\n")
+						sys.stderr.write("\t" + "[error]: " + ("[%d/%d] tag_not_repo: " % (x, l)) + primary_item["name"] + "\n")
 						add_flag = 0
 				
 				if (add_flag != 0):
@@ -885,9 +851,13 @@ def main(args):
 				
 				if (add_flag == 2):
 					try:
-						state_info = koji_state(primary_item["nvr"], secondary_obj)
+						last_build = build_item(primary_item["name"], conf_opts["tag_name"], secondary_obj, init_item=False)
+						if (last_build):
+							state_info = koji_state(last_build["nvr"], secondary_obj)
+						else:
+							state_info = koji_state(primary_item["nvr"], secondary_obj)
 						if (state_info["state"] == 1):
-							sys.stderr.write("[info]: " + ("[%d/%d] build_completed: " % (x, l)) + primary_item["nvr"] + "\n")
+							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] build_completed: " % (x, l)) + primary_item["nvr"] + "\n")
 							add_flag = 0
 						elif (state_info["state"] == -3):
 							error_list = proc_error(state_info, secondary_obj)
@@ -897,12 +867,12 @@ def main(args):
 							if (len(pre_list) > 0):
 								extra_list.append(["error",pre_list])
 					except:
-						sys.stderr.write("[error]: " + ("[%d/%d] koji_state: " % (x, l)) + primary_item["nvr"] + "\n")
+						sys.stderr.write("\t" + "[error]: " + ("[%d/%d] koji_state: " % (x, l)) + primary_item["nvr"] + "\n")
 						add_flag = 0
 				
 				if (add_flag == 2):
 					que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":pre_list, "prio_flag":False}
-					sys.stderr.write("[info]: " + ("[%d/%d] adding: " % (x, l)) + primary_item["nvr"] + "\n")
+					sys.stderr.write("\t" + "[info]: " + ("[%d/%d] adding: " % (x, l)) + primary_item["nvr"] + "\n")
 					if (arch_found == False):
 						extra_list.append(["noarch",que_item])
 					else:
@@ -922,13 +892,19 @@ def main(args):
 		
 		if (loop_flag == 0):
 			seen_list = []
+			x = 0 ; l = len(extra_list)
+			
 			for extra_item in extra_list:
+				x += 1
+				
 				if (extra_item[0] == "noarch"):
 					import_noarch(extra_item[1], conf_opts["excl_list"], conf_opts["tag_name"], secondary_obj)
+				
 				elif (extra_item[0] == "error"):
 					for pre_item in extra_item[1]:
 						if (pre_item in seen_list):
 							continue
+						
 						for primary_item in primary_tags:
 							if (primary_item["name"] != pre_item):
 								continue
@@ -936,9 +912,13 @@ def main(args):
 							if (len(task_info) < 1):
 								continue
 							primary_item = task_info[0]
+							
+							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] priority: " % (x, l)) + primary_item["nvr"] + "\n")
+							
 							state_info = koji_state(primary_item["nvr"], secondary_obj)
 							que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":[], "prio_flag":True}
 							check_list[primary_item["name"]] = que_item
+						
 						seen_list.append(pre_item)
 		
 		''' **********************************************
@@ -949,13 +929,15 @@ def main(args):
 			update_time = int(time.time())
 			x = 0 ; l = len(check_list.keys())
 			
+			sys.stderr.write("[info] Starting inner processing loop..." + "\n")
+			
 			for check_key in check_list.keys():
 				x += 1
 				skip_flag = 0
 				que_item = check_list[check_key]
 				task_info = que_item["task_info"]
 				
-				sys.stderr.write("[info] processing: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
+				sys.stderr.write("\t" + "[info] processing: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
 				
 				''' *************************************************************************************************
 				    * Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
@@ -1082,6 +1064,7 @@ def main(args):
 				''' Login and authenticate to the Koji server '''
 				
 				try:
+					primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
 					secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
 					secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
 				except:
@@ -1100,9 +1083,9 @@ def main(args):
 					else:
 						que_sort = []
 						while (len(que_error) > 0):
-							init_item = last_root(conf_opts["tag_name"], conf_opts["primary_url"], que_error[0], obj_only=1)
-							if (init_item):
-								que_sort = sorted_insert([init_item["creation_ts"], que_error[0]], que_sort)
+							init_build = build_item(que_error[0]["srpm_name"], conf_opts["tag_name"], primary_obj, init_item=True)
+							if (init_build):
+								que_sort = sorted_insert([init_build["creation_ts"], que_error[0]], que_sort)
 							else:
 								sys.stdout.write(("que[e] [-%d/%d]: " % (len(que_error), conf_opts["que_limit"])) + form_info(que_error[0],"task_info") + "\n")
 							que_error.pop(0)
@@ -1136,7 +1119,7 @@ def main(args):
 				
 				time.sleep(wait_time)
 			
-			sys.stdout.write("[info] Exiting inner que loop..." + "\n")
+			''' End of inner que loop '''
 		
 		''' End of outer infinite loop '''
 		
