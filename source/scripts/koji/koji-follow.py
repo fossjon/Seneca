@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# Version: 1.6
-# Date: 14/02/2013 (dd/mm/yyyy)
+# Version: 1.7
+# Date: 19/02/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 #
 # Execution notes (*you must*):
@@ -53,6 +53,20 @@ def _unique_path(prefix):
 ''' ********************************
     * Local script related methods *
     ******************************** '''
+
+'''
+	Delete the given filename
+'''
+
+def delete(file_name):
+	if (not file_name):
+		return 1
+	sys.stderr.write("\t" + "[info] file_delete: " + file_name + "\n")
+	try:
+		os.unlink(file_name)
+	except:
+		return 1
+	return 0
 
 '''
 	Print out a data item in string form
@@ -118,41 +132,38 @@ def conf_file(file_name, old_opts):
 	Define a db method so other scripts can check our recorded state of packages
 '''
 
-def local_db(rpm_data, pres_time):
-	db_conn = sqlite3.connect(".koji-follow.state.db")
-	db_curs = db_conn.cursor()
+def local_db(rpm_data, db_mode):
+	if (db_mode == 0):
+		delete(".kf-state.db.tmp")
 	
-	try:
-		db_curs.execute("CREATE TABLE packages (pkg_name text, pkg_info text, update_time int);")
-	except:
-		pass
+	elif (db_mode == 1):
+		db_conn = sqlite3.connect(".kf-state.db.tmp")
+		db_curs = db_conn.cursor()
+		
+		try:
+			db_curs.execute("CREATE TABLE packages (pkg_name text, pkg_info text);")
+		except:
+			pass
+		
+		try:
+			db_curs.execute("INSERT INTO packages VALUES ('%s', \"%s\");" % (rpm_data["srpm_name"], str(rpm_data)))
+		except:
+			pass
+		
+		db_conn.commit()
+		db_conn.close()
 	
-	if (rpm_data):
-		db_curs.execute("DELETE FROM packages WHERE pkg_name = '%s';" % (rpm_data["srpm_name"]))
-		db_curs.execute("INSERT INTO packages VALUES ('%s', \"%s\", %d);" % (rpm_data["srpm_name"], str(rpm_data), pres_time))
-	else:
-		db_curs.execute("DELETE FROM packages WHERE update_time < %d;" % (pres_time))
-	
-	db_conn.commit()
-	db_conn.close()
+	elif (db_mode == 2):
+		delete(".kf-state.db")
+		
+		try:
+			os.rename(".kf-state.db.tmp", ".kf-state.db")
+		except:
+			pass
 
 ''' **********************************
     * General script related methods *
     ********************************** '''
-
-'''
-	Delete the given filename
-'''
-
-def delete(file_name):
-	if (not file_name):
-		return 1
-	sys.stderr.write("\t" + "[info] delete: " + file_name + "\n")
-	try:
-		os.unlink(file_name)
-	except:
-		pass
-	return 0
 
 '''
 	Clear the rpmbuild folder structure
@@ -183,7 +194,7 @@ def download_file(url_str, file_name):
 		if (os.path.exists(file_name)):
 			return 0
 	
-	sys.stderr.write("\t" + "[info] downloading: " + ("[%s] -> [%s]" % (url_str, file_name)) + "\n")
+	sys.stderr.write("\t" + "[info] file_download: " + ("[%s] -> [%s]" % (url_str, file_name)) + "\n")
 	
 	try:
 		if (file_name):
@@ -208,7 +219,7 @@ def download_file(url_str, file_name):
 			return data_str
 	
 	except:
-		sys.stderr.write("\t" + "[error] download" + "\n")
+		sys.stderr.write("\t" + "[error] download_file" + "\n")
 		return 1
 	
 	return 0
@@ -311,7 +322,7 @@ def decomp_file(file_name):
 	if (comp_obj):
 		plain_name = re.sub("\.[bg]z[0-9A-Za-z]*$", "", file_name)
 		
-		sys.stderr.write("\t" + "[info] decompressing: " + ("[%s] -> [%s]" % (file_name, plain_name)) + "\n")
+		sys.stderr.write("\t" + "[info] file_decompress: " + ("[%s] -> [%s]" % (file_name, plain_name)) + "\n")
 		
 		file_obj = open(plain_name, "wb")
 		
@@ -358,7 +369,7 @@ def get_repodata(koji_url, arch_name, target_name, file_name):
 		try:
 			os.rename(final_name, file_name)
 		except:
-			sys.stderr.write("\t" + "[error] rename: " + final_name + " -> " + file_name + "\n")
+			sys.stderr.write("\t" + "[error] file_rename: " + final_name + " -> " + file_name + "\n")
 			return ""
 		final_name = file_name
 	
@@ -523,7 +534,10 @@ def process_que(inpt_list):
 			break
 		for tmp_item in tmp_list:
 			if (wait_flag == 0):
-				ready_list.append(tmp_item)
+				if (tmp_item["prio_flag"] == True):
+					ready_list.insert(0, tmp_item)
+				else:
+					ready_list.append(tmp_item)
 			else:
 				wait_list.append(tmp_item)
 		wait_flag = 1
@@ -574,7 +588,7 @@ def proc_error(info_obj, koji_obj):
 	Attempt to find either the first or latest build attempt for a given pkg name
 '''
 
-def build_item(pkg_name, koji_tag, koji_obj, init_item=True):
+def build_item(pkg_name, koji_tag, koji_obj, init_item):
 	final_item = None
 	
 	try:
@@ -594,22 +608,28 @@ def build_item(pkg_name, koji_tag, koji_obj, init_item=True):
 			except:
 				tag_list = []
 			
-			if (init_item == True):
-				if (build_info["state"] != 1):
-					continue
-				for tag_item in tag_list:
-					if (tag_item["name"] == koji_tag):
-						if (not final_item):
-							final_item = build_info
-						elif (build_info["creation_ts"] < final_item["creation_ts"]):
-							final_item = build_info
-			
-			else:
+			tag_flag = 0
+			for tag_item in tag_list:
+				if (tag_item["name"] == koji_tag):
+					tag_flag = 1
+			if (tag_flag != 1):
 				tag_numb = re.sub("[^0-9]", "", koji_tag)
 				regx_end = re.match("^.*\.fc%s$" % (tag_numb), build_info["release"], re.I)
 				regx_mid = re.match("^.*\.fc%s\..*$" % (tag_numb), build_info["release"], re.I)
-				if ((not regx_end) and (not regx_mid)):
+				if (regx_end or regx_mid):
+					tag_flag = 1
+			if (tag_flag != 1):
+				continue
+			
+			if (init_item == True):
+				if (build_info["state"] != 1):
 					continue
+				if (not final_item):
+					final_item = build_info
+				elif (build_info["creation_ts"] < final_item["creation_ts"]):
+					final_item = build_info
+			
+			else:
 				if (not final_item):
 					final_item = build_info
 				elif (build_info["creation_ts"] > final_item["creation_ts"]):
@@ -640,17 +660,12 @@ def sorted_insert(insert_item, input_list):
 	Upload, import, tag, and skip any noarch detected packages
 '''
 
-def import_noarch(que_item, block_list, koji_tag, koji_obj):
+def import_noarch(que_item, koji_tag, koji_obj):
 	noarch_flag = 0
 	task_info = que_item["task_info"]
 	dev_null = open("/dev/null", "r+")
 	
-	sys.stderr.write("\t" + "[info]" + " noarch: " + str(que_item) + "\n")
-	
-	if (noarch_flag == 0):
-		if (que_item["srpm_name"] in block_list):
-			sys.stderr.write("\t" + "[error] noarch_excluded" + "\n")
-			noarch_flag = 1
+	sys.stderr.write("\t" + "[info]" + " import_noarch: " + str(que_item) + "\n")
 	
 	''' Download all of the noarch rpm files '''
 	
@@ -680,7 +695,7 @@ def import_noarch(que_item, block_list, koji_tag, koji_obj):
 				file_path = ("%s/%s" % (pres_dir, rpm_name))
 				server_dir = _unique_path("cli-import")
 				
-				#sys.stderr.write("\t" + "[info] import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
+				#sys.stderr.write("\t" + "[info] file_import: " + ("[%s] -> [%s]" % (file_path, server_dir)) + "\n")
 				
 				try:
 					koji_obj.uploadWrapper(file_path, server_dir)
@@ -696,7 +711,7 @@ def import_noarch(que_item, block_list, koji_tag, koji_obj):
 	if (noarch_flag == 0):
 		for pkg_item in task_info:
 			if (pkg_item["arch"] == "src"):
-				#sys.stderr.write("\t" + "[info] tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
+				#sys.stderr.write("\t" + "[info] pkg_tag: " + ("[%s] <- [%s]" % (conf_opts["tag_name"], pkg_item["nvr"])) + "\n")
 				
 				try:
 					koji_obj.tagBuild(koji_tag, pkg_item["nvr"])
@@ -833,7 +848,7 @@ def main(args):
 				
 				if (add_flag != 0):
 					if (len(task_info) < 1):
-						sys.stderr.write("\t" + "[error]: " + ("[%d/%d] tag_not_repo: " % (x, l)) + primary_item["name"] + "\n")
+						sys.stderr.write("\t" + "[error]: " + ("[%d/%d] tag_!_repo: " % (x, l)) + primary_item["name"] + "\n")
 						add_flag = 0
 				
 				if (add_flag != 0):
@@ -847,17 +862,17 @@ def main(args):
 							evr_beta = (str(primary_item["epoch"]), primary_item["version"], primary_item["release"])
 							if (rpm.labelCompare(evr_alpha, evr_beta) < 0):
 								add_flag = 2
-					pre_list = []
 				
 				if (add_flag == 2):
 					try:
-						last_build = build_item(primary_item["name"], conf_opts["tag_name"], secondary_obj, init_item=False)
+						last_build = build_item(primary_item["name"], conf_opts["tag_name"], secondary_obj, False)
 						if (last_build):
 							state_info = koji_state(last_build["nvr"], secondary_obj)
 						else:
 							state_info = koji_state(primary_item["nvr"], secondary_obj)
+						pre_list = []
 						if (state_info["state"] == 1):
-							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] build_completed: " % (x, l)) + primary_item["nvr"] + "\n")
+							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] build_completed: " % (x, l)) + str(state_info) + "\n")
 							add_flag = 0
 						elif (state_info["state"] == -3):
 							error_list = proc_error(state_info, secondary_obj)
@@ -872,18 +887,19 @@ def main(args):
 				
 				if (add_flag == 2):
 					que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":pre_list, "prio_flag":False}
-					sys.stderr.write("\t" + "[info]: " + ("[%d/%d] adding: " % (x, l)) + primary_item["nvr"] + "\n")
+					sys.stderr.write("\t" + "[info]: " + ("[%d/%d] pkg_check: " % (x, l)) + ("%s :: %s -> %s" % (primary_item["nvr"], str(state_info), str(pre_list))) + "\n")
 					if (arch_found == False):
 						extra_list.append(["noarch",que_item])
 					else:
 						check_list[primary_item["name"]] = que_item
 		
 		''' ***********************************************
-		    * Process any noarch or error tagged packages *
+		    * Process any noarch or error marked packages *
 		    *********************************************** '''
 		
 		if (loop_flag == 0):
 			try:
+				primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
 				secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
 				secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
 			except:
@@ -898,7 +914,7 @@ def main(args):
 				x += 1
 				
 				if (extra_item[0] == "noarch"):
-					import_noarch(extra_item[1], conf_opts["excl_list"], conf_opts["tag_name"], secondary_obj)
+					import_noarch(extra_item[1], conf_opts["tag_name"], secondary_obj)
 				
 				elif (extra_item[0] == "error"):
 					for pre_item in extra_item[1]:
@@ -911,12 +927,15 @@ def main(args):
 							(arch_found, task_info) = get_pkgs(primary_item["name"], primary_repo)
 							if (len(task_info) < 1):
 								continue
-							primary_item = task_info[0]
+							primary_item = build_item(task_info[0]["name"], conf_opts["tag_name"], primary_obj, True)
+							if (not primary_item):
+								continue
+							primary_item["url"] = ("%s/packages/%s/%s/%s/src/%s.src.rpm" % (conf_opts["primary_url"], primary_item["name"], primary_item["version"], primary_item["release"], primary_item["nvr"]))
 							
-							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] priority: " % (x, l)) + primary_item["nvr"] + "\n")
+							sys.stderr.write("\t" + "[info]: " + ("[%d/%d] pkg_priority: " % (x, l)) + primary_item["nvr"] + "\n")
 							
 							state_info = koji_state(primary_item["nvr"], secondary_obj)
-							que_item = {"srpm_name":primary_item["name"], "task_info":task_info, "que_state":state_info, "dep_list":[], "prio_flag":True}
+							que_item = {"srpm_name":primary_item["name"], "task_info":[primary_item], "que_state":state_info, "dep_list":[], "prio_flag":True}
 							check_list[primary_item["name"]] = que_item
 						
 						seen_list.append(pre_item)
@@ -926,7 +945,6 @@ def main(args):
 		    ********************************************** '''
 		
 		if (loop_flag == 0):
-			update_time = int(time.time())
 			x = 0 ; l = len(check_list.keys())
 			
 			sys.stderr.write("[info] Starting inner processing loop..." + "\n")
@@ -937,7 +955,12 @@ def main(args):
 				que_item = check_list[check_key]
 				task_info = que_item["task_info"]
 				
-				sys.stderr.write("\t" + "[info] processing: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
+				sys.stderr.write("\t" + "[info] pkg_process: " + ("[%d/%d]: " % (x, l)) + que_item["srpm_name"] + "\n")
+				
+				if (skip_flag == 0):
+					if (que_item["srpm_name"] in conf_opts["excl_list"]):
+						sys.stderr.write("\t" + "[info]: " + "pkg_excluded" + "\n")
+						skip_flag = 1
 				
 				''' *************************************************************************************************
 				    * Download and rebuild the given source rpm file for our arch to get the needed "BuildRequires" *
@@ -1003,11 +1026,8 @@ def main(args):
 						prev_task = prev_item["task_info"]
 						
 						que_item["que_flag"] = prev_item["que_flag"]
-						
-						if (len(prev_item["dep_list"]) != len(que_item["dep_list"])):
-							que_item["que_flag"] = False
-						if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
-							que_item["que_flag"] = False
+						#if (prev_task[0]["nvr"] != task_info[0]["nvr"]):
+						#	que_item["que_flag"] = False
 				
 				''' *************************************************************************************
 				    * Process any packages marked as a priority and clear any flags that would block it *
@@ -1017,33 +1037,33 @@ def main(args):
 					if (que_item["prio_flag"] == True):
 						que_item["cap_list"] = []
 						que_item["dep_list"] = []
-						task_info[0]["url"] = rpmb_file
-						srpm_file = os.path.basename(task_info[0]["url"])
-						try:
-							shutil.copyfile(task_info[0]["url"], srpm_file)
-						except:
-							sys.stderr.write("\t" + "[error] rpm_copy: " + ("[%s] -> [%s]" % (task_info[0]["url"], srpm_file)) + "\n")
-							skip_flag = 1
+						
+						#task_info[0]["url"] = rpmb_file
+						#srpm_file = os.path.basename(task_info[0]["url"])
+						#try:
+						#	shutil.copyfile(task_info[0]["url"], srpm_file)
+						#except:
+						#	sys.stderr.write("\t" + "[error] rpm_copy: " + ("[%s] -> [%s]" % (task_info[0]["url"], srpm_file)) + "\n")
+						#	skip_flag = 1
 				
 				''' *******************************************************************************
 				    * Append this que item, set any last minute flags, and write it out to the db *
 				    ******************************************************************************* '''
 				
 				if (skip_flag == 0):
-					if (que_item["que_state"]["state"] == 0):
-						que_item["que_flag"] = True
-					if (que_item["srpm_name"] in conf_opts["excl_list"]):
-						que_item["que_flag"] = True
-					sys.stderr.write("\t" + "[info] processed: " + form_info(que_item,"task_info") + "\n")
+					sys.stderr.write("\t" + "[info] pkg_que: " + form_info(que_item,"task_info") + "\n")
 					que_list[check_key] = que_item
+			
+			''' Remove any uneeded items from the old que list and store the new results '''
 			
 			for que_key in que_list.keys():
 				if (not que_key in check_list.keys()):
 					del que_list[que_key]
 			
+			local_db(None, 0)
 			for que_key in que_list.keys():
-				local_db(que_list[que_key], update_time)
-			local_db(None, update_time)
+				local_db(que_list[que_key], 1)
+			local_db(None, 2)
 		
 		''' ****************************************************************
 		    * Inner que'ing loop for the first level of processed packages *
@@ -1083,7 +1103,7 @@ def main(args):
 					else:
 						que_sort = []
 						while (len(que_error) > 0):
-							init_build = build_item(que_error[0]["srpm_name"], conf_opts["tag_name"], primary_obj, init_item=True)
+							init_build = build_item(que_error[0]["srpm_name"], conf_opts["tag_name"], primary_obj, True)
 							if (init_build):
 								que_sort = sorted_insert([init_build["creation_ts"], que_error[0]], que_sort)
 							else:
