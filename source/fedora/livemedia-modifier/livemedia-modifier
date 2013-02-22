@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.8
-Date:     06/02/2013 (dd/mm/yyyy)
+Version:  1.9
+Date:     21/02/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -432,7 +432,7 @@ def conf(opts):
 			filo.write("UBOOT_DIR=/boot/uboot\n")
 			filo.write("UBOOT_DEVICE=mmcblk0p%d\n" % (opts["boot"][0]))
 			filo.close()
-			print("Write :: [%s]" % (filn))
+			print("Append :: [%s]" % (filn))
 		except:
 			print("Error appending to the sysconfig uboot file!")
 			disk(opts, "d")
@@ -490,17 +490,44 @@ def conf(opts):
 		if (opts["cmpr"][2] == "true"):
 			# Create a consolidated root fs archive
 			
-			tarb = ("%s.tar.xz" % (name))
+			tarb = ("%s.cpio.xz" % (name))
 			
 			fold = opts["root"][1]
-			name = ""
 			
-			print("%s-Tar :: [%s] <- (-> [%s/]) [./%s]" % (opts["type"][2], tarb, fold, name))
+			print("%s-cpio.xz :: [%s] <- (-> [%s/]) [./]" % (opts["type"][2], tarb, fold))
 			
-			retn = subprocess.call(["/bin/tar", "-cJf", tarb, "-C", "%s/" % (fold), "--exclude=./boot/*", "--exclude=./lib/modules/*", "--exclude=./usr/lib/modules/*", "./%s" % (name)])
+			try:
+				cwdp = os.getcwd()
+				os.chdir(fold)
+			except:
+				print("Error changing into dir [%s]!" % (fold))
+				disk(opts, "d")
+				sys.exit(1)
 			
-			if (retn != 0):
-				print("Error creating tarball file [%s]!" % (tarb))
+			fcmd = subprocess.Popen(["/bin/find", ".", "-depth", "-print"], stdout=subprocess.PIPE)
+			gcmd = subprocess.Popen(["/bin/egrep", "-v", "^./(boot|lib/modules|usr/lib/modules)/.*$"], stdin=fcmd.stdout, stdout=subprocess.PIPE)
+			ccmd = subprocess.Popen(["/bin/cpio", "-o"], stdin=gcmd.stdout, stdout=subprocess.PIPE)
+			xcmd = subprocess.Popen(["/bin/xz"], stdin=ccmd.stdout, stdout=subprocess.PIPE)
+			
+			fcmd.stdout.close()
+			gcmd.stdout.close()
+			ccmd.stdout.close()
+			
+			try:
+				filn = ("%s/%s" % (cwdp, tarb))
+				fobj = open(filn, "w")
+				while (1):
+					try:
+						fstr = xcmd.stdout.read(8192)
+					except:
+						break
+					if (not fstr):
+						break
+					fobj.write(fstr)
+				fobj.close()
+				os.chdir(cwdp)
+			except:
+				print("Error writing file [%s]!" % (filn))
 				disk(opts, "d")
 				sys.exit(1)
 

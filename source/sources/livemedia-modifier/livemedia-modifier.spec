@@ -1,5 +1,5 @@
 Name:		livemedia-modifier
-Version:	1.8
+Version:	1.9
 Release:	1%{?dist}
 Summary:	Takes an ARM image file and finalizes it with device specific configurations and modifications
 
@@ -36,6 +36,9 @@ install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_sbindir}/
 
 
 %changelog
+* Thu Feb 21 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.9-1
+- Changed the rootfs archive+compression to cpio+xz
+
 * Wed Feb 06 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.8-1
 - Changed the partition label and fstab line mod for guru
 
