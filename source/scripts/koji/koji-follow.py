@@ -1,16 +1,11 @@
 #!/usr/bin/python
 
-# Version: 1.8
-# Date: 26/02/2013 (dd/mm/yyyy)
+# Version: 1.9
+# Date: 05/03/2013 (dd/mm/yyyy)
 # Name: Jon Chiappetta (jonc_mailbox@yahoo.ca)
-#
-# Execution notes (*you must*):
-#
-# - Allow and add any new package names to the given build tag
-# - Resolve any circular dependency package issues
 
 '''
-	Define the needed imports
+	Import the needed library modules
 '''
 
 import ast
@@ -428,7 +423,7 @@ def import_noarch(noarch_list, src_koji, src_url, dst_koji, dst_tag):
 	down_list = []
 	
 	for pkg_item in noarch_list:
-		rpm_url = (path_info.build(build_info) + "/" + path_info.rpm(pkg_item))
+		rpm_url = (path_info.build(srpm_info) + "/" + path_info.rpm(pkg_item))
 		rpm_file = os.path.basename(rpm_url)
 		delete(rpm_file)
 		if (download_file(rpm_url, rpm_file) != 0):
@@ -522,10 +517,6 @@ def main(args):
 		try:
 			primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
 			primary_tags = primary_obj.listTagged(conf_opts["tag_name"], inherit=False, latest=True)
-			
-			secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
-			secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
-		
 		except:
 			sys.stderr.write("[error] latest_tagged" + "\n")
 			time.sleep(wait_time)
@@ -543,6 +534,13 @@ def main(args):
 			primary_builds = []
 			
 			if (pid_num == 0):
+				try:
+					primary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["primary_url"]))
+					secondary_obj = koji.ClientSession("%s/kojihub" % (conf_opts["secondary_url"]))
+					secondary_obj.ssl_login(conf_opts["client_cert"], conf_opts["server_cert"], conf_opts["server_cert"])
+				except:
+					primary_len = -1
+				
 				for y in range(x, l):
 					if (y >= primary_len):
 						continue
@@ -552,7 +550,9 @@ def main(args):
 					
 					(arch_pkg, pkg_list) = noarch_check(primary_item["build_id"], primary_obj)
 					if (arch_pkg == 0):
-						import_noarch(pkg_list, primary_obj, conf_opts["primary_url"], secondary_obj, conf_opts["tag_name"])
+						state_info = koji_state(primary_item["nvr"], secondary_obj)
+						if (state_info["state"] < 0):
+							import_noarch(pkg_list, primary_obj, conf_opts["primary_url"], secondary_obj, conf_opts["tag_name"])
 						continue
 					
 					if (conf_opts["check_tag"] == "all"):
@@ -560,7 +560,11 @@ def main(args):
 						for build_item in build_list:
 							primary_builds.append(build_item)
 					elif (conf_opts["check_tag"] == "latest"):
-						primary_builds.append(primary_item)
+						try:
+							build_item = primary_obj.getBuild(primary_item["nvr"])
+							primary_builds.append(build_item)
+						except:
+							sys.stderr.write("\t" + "[error] build_info: " + ("%s" % (primary_item["nvr"])) + "\n")
 				
 				if ((conf_opts["check_tag"] == "all") or (conf_opts["check_tag"] == "latest")):
 					local_db(None, 0, post_fix=str(i))
@@ -665,7 +669,6 @@ def main(args):
 			
 			que_build(conf_opts["tag_name"], srpm_name, secondary_obj)
 		
-		sys.exit(0)
 		time.sleep(wait_time)
 
 if (__name__ == "__main__"):
