@@ -14,8 +14,8 @@
 
 versnumb = "5"
 infotext = '''
-Date: 14/01/2013 (dd/mm/yyyy)
-Version: 1.0.2-''' + versnumb + '''
+Date: 13/03/2013 (dd/mm/yyyy)
+Version: 1.0.3-''' + versnumb + '''
 Author: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''
 
@@ -41,15 +41,19 @@ class linux:
 	def usersdir(self):
 		return "/home"
 	
-	def byttostr(self, byteinpt):
+	def byttostr(self, inptlist):
 		outpstri = ""
-		for inptitem in byteinpt:
+		for inptitem in inptlist:
 			try:
-				inptitem = ord(inptitem)
+				striinpt = str(inptitem)
 			except:
-				pass
+				striinpt = inptitem
 			try:
-				outpstri += chr(inptitem)
+				numbitem = ord(striinpt)
+			except:
+				numbitem = striinpt
+			try:
+				outpstri += chr(numbitem)
 			except:
 				outpstri += "?"
 		return outpstri
@@ -140,15 +144,19 @@ class windows:
 	def usersdir(self):
 		return "C:\\Users"
 	
-	def byttostr(self, byteinpt):
+	def byttostr(self, inptlist):
 		outpstri = ""
-		for inptitem in byteinpt:
+		for inptitem in inptlist:
 			try:
-				inptitem = ord(inptitem)
+				striinpt = str(inptitem)
 			except:
-				pass
+				striinpt = inptitem
 			try:
-				outpstri += chr(inptitem)
+				numbitem = ord(striinpt)
+			except:
+				numbitem = striinpt
+			try:
+				outpstri += chr(numbitem)
 			except:
 				outpstri += "?"
 		return outpstri
@@ -780,7 +788,7 @@ def refrdest():
 def choosource():
 	global sharedobj
 	
-	filepath = str(QtGui.QFileDialog.getOpenFileName(sharedobj["windowobj"], caption="Select Image File"))
+	filepath = sharedobj["systemt"].byttostr(QtGui.QFileDialog.getOpenFileName(sharedobj["windowobj"], caption="Select Image File"))
 	
 	if (filepath):
 		filepath = sharedobj["systemt"].fixspath(filepath)

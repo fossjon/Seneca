@@ -1,6 +1,6 @@
 Name:           fedora-arm-installer
-Version:        1.0.2
-Release:        5%{?dist}
+Version:        1.0.3
+Release:        7%{?dist}
 Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
@@ -70,6 +70,12 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Wed Mar 13 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.3-7
+- Sent the choose source dialog return string through a conversion method
+
+* Wed Feb 13 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.0.2-6
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_19_Mass_Rebuild
+
 * Mon Jan 14 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.2-5
 - Minor tweaks to the specfile files section and license info
 
