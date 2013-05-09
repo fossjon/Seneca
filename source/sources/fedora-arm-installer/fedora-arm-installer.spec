@@ -1,6 +1,6 @@
 Name:           fedora-arm-installer
-Version:        1.0.3
-Release:        7%{?dist}
+Version:        1.0.4
+Release:        8%{?dist}
 Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
@@ -70,6 +70,10 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Wed May 08 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.4-8
+- Added some language calls to prevent errors in parsing non-English character
+  sets
+
 * Wed Mar 13 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.3-7
 - Sent the choose source dialog return string through a conversion method
 

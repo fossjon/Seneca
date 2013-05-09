@@ -12,10 +12,10 @@
 # Copyright Jon Chiappetta
 #
 
-versnumb = "5"
+versnumb = "8"
 infotext = '''
-Date: 13/03/2013 (dd/mm/yyyy)
-Version: 1.0.3-''' + versnumb + '''
+Date: 26/04/2013 (dd/mm/yyyy)
+Version: 1.0.4-''' + versnumb + '''
 Author: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''
 
@@ -67,10 +67,11 @@ class linux:
 	def execcomd(self, comdlist, pipelist=[], errredir=False):
 		sys.stderr.write("execute:" + str(comdlist) + "|" + str(pipelist) + "\n"); sys.stderr.flush()
 		
+		envrobjc = os.environ; envrobjc["LANG"] = "C"
 		if (not errredir):
-			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE)
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, env=envrobjc)
 		else:
-			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=envrobjc)
 		
 		return [returnpi]
 	
@@ -170,6 +171,7 @@ class windows:
 	def execcomd(self, comdlist, pipelist=[], errredir=False):
 		sys.stderr.write("execute:" + str(comdlist) + "|" + str(pipelist) + "\n"); sys.stderr.flush()
 		
+		subprocess.check_call("chcp 1252", shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
 		if (not errredir):
 			returnpi = subprocess.Popen(comdlist, stdout=subprocess.PIPE, shell=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
 		else:
