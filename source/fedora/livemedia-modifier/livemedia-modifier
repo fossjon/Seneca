@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  1.9
-Date:     21/02/2013 (dd/mm/yyyy)
+Version:  2.0
+Date:     30/05/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -235,7 +235,7 @@ def form(opts):
 		if (opts["type"][2] == ARMS["panda"]):
 			label = "uboot"
 		
-		retn = subprocess.call(["/sbin/mkfs.vfat", "-F", "32", "-n", label, opts["boot"][2]])
+		retn = subprocess.call(["/sbin/mkfs.vfat", "-n", label, opts["boot"][2]])
 		
 		if (retn != 0):
 			print("Error making filesystem on [%s]!" % (opts["boot"][2]))
@@ -263,16 +263,17 @@ def boot(opts):
 			if (not os.path.isdir(diri)):
 				continue
 			
-			if (re.match("^uboot-.*$", item, re.I)):
-				flst = os.listdir(diri)
-				
-				for fili in flst:
-					filn = ("%s/%s" % (diri, fili))
+			for keyn in ARMS.keys():
+				if ((opts["type"][2] == ARMS[keyn]) and (item == ("uboot-%s" % (keyn)))):
+					flst = os.listdir(diri)
 					
-					if (os.path.isfile(filn)):
-						fles.append(filn)
+					for fili in flst:
+						filn = ("%s/%s" % (diri, fili))
+						
+						if (os.path.isfile(filn)):
+							fles.append(filn)
 		
-		# Get a list of boot files from the root partition
+		'''# Get a list of boot files from the root partition
 		
 		dirp = ("%s/boot" % (opts["root"][1]))
 		dirl = os.listdir(dirp)
@@ -282,7 +283,7 @@ def boot(opts):
 				filn = ("%s/%s" % (dirp, item))
 				
 				if (os.path.isfile(filn)):
-					fles.append(filn)
+					fles.append(filn)'''
 		
 		# Re-mount the boot partition since last format
 		
@@ -635,14 +636,17 @@ Modify a livemedia-creator image for specific platform requirements.
 		if (opti[0] == "--platform"):
 			optl["type"][2] = opti[1]
 		if ((opti[0] == "-h") or (opti[0] == "--help")):
-			print(usem + "\n\n" + help)
+			print("\n" + usem + "\n\n" + help)
 			sys.exit(1)
 		if ((opti[0] == "-v") or (opti[0] == "--version")):
 			print(INFO)
 			sys.exit(1)
 	
 	if ((not optl["disk"][2]) or (not os.path.exists(optl["disk"][2]))):
-		print("Could not find the image file [%s]!" % (optl["disk"][2]))
+		if (not optl["disk"][2]):
+			print("\n" + usem + "\n\n" + help)
+		else:
+			print("Could not find the image file [%s]!" % (optl["disk"][2]))
 		sys.exit(1)
 	
 	found = 0
