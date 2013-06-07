@@ -1,5 +1,5 @@
 Name:           fedora-arm-installer
-Version:        1.0.4
+Version:        1.1.1
 Release:        8%{?dist}
 Summary:        Writes binary image files to any specified block device
 
@@ -70,6 +70,9 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
 %changelog
+* Fri Jun 07 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.1.1-8
+- Changed the tempfile module dir location to var
+
 * Wed May 08 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.0.4-8
 - Added some language calls to prevent errors in parsing non-English character
   sets
