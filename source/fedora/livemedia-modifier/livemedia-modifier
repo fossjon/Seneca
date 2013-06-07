@@ -591,7 +591,7 @@ Modify a livemedia-creator image for specific platform requirements.
   -v, --version         Display the current version number and last modification date.
   --image=IMAGE_NAME    Name of disk image to modify.
   --platform=PLATFORM   Platform to target {generic,kirkwood,omap,vexpress}.
-  --nocompress          Modify the image without final archival or compression (for vexpress).
+  --nocompress          Modify the image without final archival or compression (for vexpress platform).
 '''.strip()
 	
 	if (os.getuid() != 0):
@@ -608,7 +608,7 @@ Modify a livemedia-creator image for specific platform requirements.
 	
 	optl = {	"disk":[-2, "/dev/null", None], "boot":[1, "/mnt/boot", None], "root":[-1, "/mnt/root", None],
 				"type":[-2, "/dev/null", None], "cmpr":[-2, "/dev/null", "true"]
-	}
+		}
 	
 	# Parse thru the command line arguments and options
 	
@@ -632,7 +632,6 @@ Modify a livemedia-creator image for specific platform requirements.
 		sys.exit(1)
 	
 	found = 0
-	
 	for ARMI in ARMS.keys():
 		if (ARMS[ARMI] == optl["type"][2]):
 			found = 1
@@ -641,12 +640,23 @@ Modify a livemedia-creator image for specific platform requirements.
 		print("Could not recognize the platform type [%s]!" % (optl["type"][2]))
 		sys.exit(1)
 	
+	# Setup some last minute variables
+	
 	for opti in opts:
 		if (opti[0] == "--nocompress"):
 			optl["cmpr"][2] = None
 	
 	if ((optl["type"][2] != ARMS["vexp"]) and (optl["type"][2] != ARMS["general"])):
 		optl["cmpr"][2] = None
+	
+	try:
+		new_file = ("%s-%s.img" % (optl["disk"][2], optl["type"][2]))
+		print("Copy [%s] -> [%s]" % (optl["disk"][2], new_file))
+		shutil.copyfile(optl["disk"][2], new_file)
+		optl["disk"][2] = new_file
+	except:
+		print("Could not make a tmp copy of the image [%s]!" % (new_file))
+		sys.exit(1)
 	
 	# Call all of the sub methods
 	
@@ -663,7 +673,7 @@ Modify a livemedia-creator image for specific platform requirements.
 		disk(optl, "d")
 		last(optl)
 	
-	print("\nModification completed successfully!")
+	print("\nModification complete! Any changes made were saved here -> [%s]" % (optl["disk"][2]))
 
 if (__name__ == "__main__"):
 	main()

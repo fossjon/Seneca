@@ -14,8 +14,8 @@
 
 versnumb = "8"
 infotext = '''
-Date: 26/04/2013 (dd/mm/yyyy)
-Version: 1.0.4-''' + versnumb + '''
+Date: 08/06/2013 (dd/mm/yyyy)
+Version: 1.1.1-''' + versnumb + '''
 Author: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''
 
@@ -1113,6 +1113,7 @@ def main():
 
 if (os.name == "posix"):
 	sharedobj["systemt"] = linux()
+	tempfile.tempdir = "/var/tmp"
 else:
 	sharedobj["systemt"] = windows()
 
