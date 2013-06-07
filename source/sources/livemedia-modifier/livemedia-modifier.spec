@@ -1,5 +1,5 @@
 Name:		livemedia-modifier
-Version:	2.0
+Version:	2.1
 Release:	1%{?dist}
 Summary:	Takes an ARM image file and finalizes it with device specific configurations and modifications
 
@@ -36,6 +36,9 @@ install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_sbindir}/
 
 
 %changelog
+* Fri Jun 07 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 2.1-1
+- Changed the archival method for root fs creation
+
 * Thu May 30 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 2.0-1
 - Modified the partition format and uboot file copy for omap
 

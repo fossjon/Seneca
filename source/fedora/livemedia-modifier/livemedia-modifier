@@ -1,8 +1,8 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  2.0
-Date:     30/05/2013 (dd/mm/yyyy)
+Version:  2.1
+Date:     07/06/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-ARMS = {"general":"generic", "guru":"kirkwood", "panda":"omap", "any":"vexpress"}
+ARMS = {"general":"generic", "guru":"kirkwood", "panda":"omap", "vexp":"vexpress"}
 
 # Implement "mkdir -p" in python
 
@@ -356,7 +356,7 @@ def boot(opts):
 					print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
 
 '''
-	Remove, modify, or create any needed config or binary files
+	Remove, modify, or create needed config or binary files
 '''
 
 def conf(opts):
@@ -439,7 +439,7 @@ def conf(opts):
 			disk(opts, "d")
 			sys.exit(1)
 	
-	if (opts["type"][2] == ARMS["any"]):
+	if (opts["type"][2] == ARMS["vexp"]):
 		mdir(fold, "%s/boot" % (name), pref=opts["type"][2])
 		
 		for srcp in ["%s" % (opts["boot"][1]), "%s/boot" % (opts["root"][1])]:
@@ -491,11 +491,11 @@ def conf(opts):
 		if (opts["cmpr"][2] == "true"):
 			# Create a consolidated root fs archive
 			
-			tarb = ("%s.cpio.xz" % (name))
+			tarb = ("%s.tar.xz" % (name))
 			
 			fold = opts["root"][1]
 			
-			print("%s-cpio.xz :: [%s] <- (-> [%s/]) [./]" % (opts["type"][2], tarb, fold))
+			print("%s.tar.xz :: [%s] <- (-> [%s/]) [./]" % (opts["type"][2], tarb, fold))
 			
 			try:
 				cwdp = os.getcwd()
@@ -505,35 +505,17 @@ def conf(opts):
 				disk(opts, "d")
 				sys.exit(1)
 			
-			fcmd = subprocess.Popen(["/bin/find", ".", "-depth", "-print"], stdout=subprocess.PIPE)
-			gcmd = subprocess.Popen(["/bin/egrep", "-v", "^./(boot|lib/modules|usr/lib/modules)/.*$"], stdin=fcmd.stdout, stdout=subprocess.PIPE)
-			ccmd = subprocess.Popen(["/bin/cpio", "-o"], stdin=gcmd.stdout, stdout=subprocess.PIPE)
-			xcmd = subprocess.Popen(["/bin/xz"], stdin=ccmd.stdout, stdout=subprocess.PIPE)
+			filn = ("%s/%s" % (cwdp, tarb))
+			retn = subprocess.call(["/bin/tar", "--selinux", "--acls", "--xattrs", "--exclude=./boot/*", "--exclude=./lib/modules/*", "--exclude=./usr/lib/modules/*", "-Jcf", filn, "./"])
+			os.chdir(cwdp)
 			
-			fcmd.stdout.close()
-			gcmd.stdout.close()
-			ccmd.stdout.close()
-			
-			try:
-				filn = ("%s/%s" % (cwdp, tarb))
-				fobj = open(filn, "w")
-				while (1):
-					try:
-						fstr = xcmd.stdout.read(8192)
-					except:
-						break
-					if (not fstr):
-						break
-					fobj.write(fstr)
-				fobj.close()
-				os.chdir(cwdp)
-			except:
+			if (retn != 0):
 				print("Error writing file [%s]!" % (filn))
 				disk(opts, "d")
 				sys.exit(1)
 
 '''
-	Perform any final configurations
+	Perform some final configurations
 '''
 
 def last(opts):
@@ -547,7 +529,7 @@ def last(opts):
 	
 	dirp = ("%s/%s" % (fold, name))
 	
-	if (opts["type"][2] == ARMS["any"]):
+	if (opts["type"][2] == ARMS["vexp"]):
 		# Copy over the main disk image file
 		
 		mdir(fold, name, pref=opts["type"][2])
@@ -609,7 +591,7 @@ Modify a livemedia-creator image for specific platform requirements.
   -v, --version         Display the current version number and last modification date.
   --image=IMAGE_NAME    Name of disk image to modify.
   --platform=PLATFORM   Platform to target {generic,kirkwood,omap,vexpress}.
-  --nocompress          Modify the image without any final archival or compression (for vexpress).
+  --nocompress          Modify the image without final archival or compression (for vexpress).
 '''.strip()
 	
 	if (os.getuid() != 0):
@@ -663,7 +645,7 @@ Modify a livemedia-creator image for specific platform requirements.
 		if (opti[0] == "--nocompress"):
 			optl["cmpr"][2] = None
 	
-	if ((optl["type"][2] != ARMS["any"]) and (optl["type"][2] != ARMS["general"])):
+	if ((optl["type"][2] != ARMS["vexp"]) and (optl["type"][2] != ARMS["general"])):
 		optl["cmpr"][2] = None
 	
 	# Call all of the sub methods
