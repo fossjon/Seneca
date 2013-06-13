@@ -1,5 +1,5 @@
 Name:		livemedia-modifier
-Version:	2.3
+Version:	2.4
 Release:	1%{?dist}
 Summary:	Takes an ARM image file and finalizes it with device specific configurations and modifications
 
@@ -36,6 +36,9 @@ install -m 0755 %{SOURCE0} $RPM_BUILD_ROOT/%{_sbindir}/
 
 
 %changelog
+* Thu Jun 13 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 2.4-1
+- Modified vexpress to include a boot script and dtb folder
+
 * Fri Jun 07 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 2.3-1
 - Modified to copy a tmp version of the image file first
 

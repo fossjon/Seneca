@@ -1,11 +1,12 @@
 #!/usr/bin/python
 
 INFO = '''
-Version:  2.1
-Date:     07/06/2013 (dd/mm/yyyy)
+Version:  2.4
+Date:     13/06/2013 (dd/mm/yyyy)
 Name:     Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''.strip()
 
+import base64
 import getopt
 import os
 import random
@@ -273,18 +274,6 @@ def boot(opts):
 						if (os.path.isfile(filn)):
 							fles.append(filn)
 		
-		'''# Get a list of boot files from the root partition
-		
-		dirp = ("%s/boot" % (opts["root"][1]))
-		dirl = os.listdir(dirp)
-		
-		for item in dirl:
-			if (re.match("^(boot\.|uImage|uInitrd|uEnv|klist\.).*$", item)):
-				filn = ("%s/%s" % (dirp, item))
-				
-				if (os.path.isfile(filn)):
-					fles.append(filn)'''
-		
 		# Re-mount the boot partition since last format
 		
 		retn = subprocess.call(["/bin/mount", opts["boot"][2], opts["boot"][1]])
@@ -363,7 +352,7 @@ def conf(opts):
 	global ARMS
 	
 	fold = "."
-	name = os.path.basename(opts["disk"][2]).replace(".img", "")
+	name = re.sub("\.[^\.]+$", "", os.path.basename(opts["disk"][2]))
 	
 	if (opts["type"][2] == ARMS["general"]):
 		name += "-rootfs"
@@ -442,16 +431,16 @@ def conf(opts):
 	if (opts["type"][2] == ARMS["vexp"]):
 		mdir(fold, "%s/boot" % (name), pref=opts["type"][2])
 		
+		# Copy out common boot files for the archive
+		
 		for srcp in ["%s" % (opts["boot"][1]), "%s/boot" % (opts["root"][1])]:
 			try:
 				flst = os.listdir(srcp)
 			except:
 				flst = []
 			
-			# Copy out common boot files for the archive
-			
 			for fitm in flst:
-				for regx in ["initramfs-.*", "vmlinuz-.*"]:
+				for regx in ["initramfs-.*", "vmlinuz-.*", "dtb-.*"]:
 					if (re.match("^%s$" % (regx), fitm, re.I)):
 						srcf = ("%s/%s" % (srcp, fitm))
 						dstf = ("%s/boot/%s" % (dirp, fitm))
@@ -461,31 +450,35 @@ def conf(opts):
 						try:
 							shutil.copyfile(srcf, dstf)
 						except:
-							print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
-			
-			# Copy out the needed vexpress shell boot scripts
-			
-			for fitm in flst:
-				for regx in ["boot-vexpress.*"]:
-					if (re.match("^%s$" % (regx), fitm, re.I)):
-						srcf = ("%s/%s" % (srcp, fitm))
-						dstf = ("%s/boot/%s" % (dirp, fitm))
-						
-						print("%s-Copy :: [%s] -> [%s]" % (opts["type"][2], srcf, dstf))
-						
-						try:
-							shutil.copyfile(srcf, dstf)
-						except:
-							print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
-						
-						print("%s-Chmod :: [%s]" % (opts["type"][2], dstf))
-						
-						retn = subprocess.call(["/bin/chmod", "755", dstf])
-						
-						if (retn != 0):
-							print("Error changing permissions on file [%s]!" % (dstf))
-							disk(opts, "d")
-							sys.exit(1)
+							try:
+								shutil.copytree(srcf, dstf, symlinks=True)
+							except:
+								print("Warning during copy [%s] !-> [%s]" % (srcf, dstf))
+		
+		# Write out the vexpress shell boot scripts
+		
+		vexp = base64.b64decode("IyEvYmluL3NoCgp1c2FnZSgpIHsKICBlY2hvICJVc2FnZTogJDAgWy0tZ3VpXSAtLWtlcm5lbD12bWxpbnV6Li4uIC0tcmFtZnM9aW5pdHJhbWZzIC0taW1hZ2U9ZnNpbWFnZSBbLS1kdGI9dmV4cHJlc3MuZHRiXSIKICBleGl0IDEKfQoKR1VJPTAKd2hpbGUgWyAkIyAtbmUgMCBdOyBkbwogICAgb3B0aW9uPSQxCiAgICBzaGlmdAoKICAgIG9wdGFyZz0iIgogICAgY2FzZSAkb3B0aW9uIGluCiAgICAtLSo9KikKICAgICAgICBvcHRhcmc9YGVjaG8gJG9wdGlvbiB8IHNlZCAtZSAncy9eW149XSo9Ly8nYAogICAgICAgIDs7CiAgICBlc2FjCgogICAgY2FzZSAkb3B0aW9uIGluCiAgICAtLWRlYnVnKQogICAgICAgIHNldCAteAogICAgICAgIDs7CiAgICAtaHwtLWgqKQogICAgICAgIHVzYWdlCiAgICAgICAgOzsKICAgIC14fC0teHwtLWd1aSkKICAgICAgICBHVUk9MQogICAgICAgIDs7CiAgICAtLWsqKQogICAgICAgIEtFUk49JG9wdGFyZwogICAgICAgIDs7CiAgICAtLWkqKQogICAgICAgIElNQUdFPSRvcHRhcmcKICAgICAgICA7OwogICAgLS1yKikKICAgICAgICBSQU1GUz0kb3B0YXJnCiAgICAgICAgOzsKICAgIC0tZmR0KnwtLWR0YiopCiAgICAgICAgRkRUPSRvcHRhcmcKICAgICAgICA7OwogICAgKikKICAgICAgICBlY2hvICIkezB9OiBJbnZhbGlkIGFyZ3VtZW50IFwiJG9wdGlvblwiIgogICAgICAgIHVzYWdlCiAgICAgICAgZXhpdCAxCiAgICAgICAgOzsKICAgIGVzYWMKZG9uZQogCmlmIFsgIiRLRVJOIiA9ICIiIF0gfHwgWyAiJElNQUdFIiA9ICIiIF0gfHwgWyAiJFJBTUZTIiA9ICIiIF07IHRoZW4KICB1c2FnZQpmaQoKaWYgWyAhIC1mICIkS0VSTiIgXTsgdGhlbgogIGVjaG8gIktlcm5lbCAkS0VSTiBub3QgZm91bmQiCiAgZXhpdCAxCmZpCmlmIFsgISAtZiAiJFJBTUZTIiBdOyB0aGVuCiAgZWNobyAiSW5pdHJhbWZzICRSQU1GUyBub3QgZm91bmQiCiAgZXhpdCAxCmZpCmlmIFsgISAtZiAiJElNQUdFIiBdOyB0aGVuCiAgZWNobyAiRmlsZXN5c3RlbSBpbWFnZSAkSU1BR0Ugbm90IGZvdW5kIgogIGV4aXQgMQpmaQppZiBbICEgLWYgIiRGRFQiIF07IHRoZW4KICBGRFRBUkc9IiIKICBLUkVWPSJgZWNobyAkS0VSTiB8IHNlZCAtZSAncy8uKnZtbGludXotXChbMC05Li1dKlwpLmZjLiovXDEvJyAtZSAncy9bLi1dLzAvZycgfCBjb2xybSA0YCIKICBpZiBbICRLUkVWIC1ndCAzMDYgXTsgdGhlbgogICAgZWNobyAiV2FybmluZzogS2VybmVsIHZlcnNpb25zIDMuNysgcmVxdWlyZSBhIGR0YiB0byBib290LiBUaGlzIHdpbGwgcHJvYmFibHkgY3Jhc2guIgogIGZpCmVsc2UKICBGRFRBUkc9Ii1kdGIgJEZEVCIKZmkKIAppZiBbIC1mIC91c3IvYmluL3FlbXUtc3lzdGVtLWFybSBdOyB0aGVuCiAgaWYgWyAkR1VJID0gMSBdOyB0aGVuCiAgICBxZW11LXN5c3RlbS1hcm0gLW1hY2hpbmUgdmV4cHJlc3MtYTkgLW0gMTAyNCAtbmV0IG5pYyAtbmV0IHVzZXIgXAogICAgICAtYXBwZW5kICJydyByb290PS9kZXYvbW1jYmxrMHAzIHJvb3R3YWl0IHBoeXNtYXAuZW5hYmxlZD0wIiBcCiAgICAgIC1rZXJuZWwgIiRLRVJOIiBcCiAgICAgIC1pbml0cmQgIiRSQU1GUyIgXAogICAgICAtc2QgIiRJTUFHRSIgJEZEVEFSRwogIGVsc2UKICAgIHFlbXUtc3lzdGVtLWFybSAtbWFjaGluZSB2ZXhwcmVzcy1hOSAtbSAxMDI0IC1ub2dyYXBoaWMgLW5ldCBuaWMgLW5ldCB1c2VyIFwKICAgICAgLWFwcGVuZCAiY29uc29sZT10dHlBTUEwLDExNTIwMG44IHJ3IHJvb3Q9L2Rldi9tbWNibGswcDMgcm9vdHdhaXQgcGh5c21hcC5lbmFibGVkPTAiIFwKICAgICAgLWtlcm5lbCAiJEtFUk4iIFwKICAgICAgLWluaXRyZCAiJFJBTUZTIiBcCiAgICAgIC1zZCAiJElNQUdFIiAkRkRUQVJHCiAgZmkKZWxzZQogIGVjaG8gIllvdSBuZWVkIHRvIGluc3RhbGwgcWVtdS1zeXN0ZW0tYXJtIHRvIGJvb3QgYSB2ZXJzYXRpbGUgZXhwcmVzcyBpbWFnZSIKICBleGl0IDEKZmkKCg==")
+		dstf = ("%s/boot/boot-vexpress" % (dirp))
+		
+		print("%s-Write :: [%s]" % (opts["type"][2], dstf))
+		
+		try:
+			fobj = open(dstf, "w")
+			fobj.write(vexp)
+			fobj.close()
+		except:
+			print("Error writing to file [%s]!" % (dstf))
+			disk(opts, "d")
+			sys.exit(1)
+		
+		print("%s-Chmod :: [%s]" % (opts["type"][2], dstf))
+		
+		retn = subprocess.call(["/bin/chmod", "755", dstf])
+		
+		if (retn != 0):
+			print("Error changing permissions on file [%s]!" % (dstf))
+			disk(opts, "d")
+			sys.exit(1)
 	
 	if (opts["type"][2] == ARMS["general"]):
 		if (opts["cmpr"][2] == "true"):
