@@ -1,6 +1,6 @@
 Name:           fedora-arm-installer
 Version:        1.1.1
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Writes binary image files to any specified block device
 
 Group:          Applications/System
@@ -11,6 +11,7 @@ Source1:        %{name}.pam
 Source2:        %{name}.cfg
 Source3:        %{name}-helper
 Source4:        %{name}.desktop
+Source5:        fedora-arm-creator
 
 BuildRequires:  desktop-file-utils
 Requires:       PyQt4
@@ -51,6 +52,7 @@ ln -s consolehelper ${RPM_BUILD_ROOT}%{_bindir}/%{name}
 
 install -d ${RPM_BUILD_ROOT}%{_sbindir}
 install -pm 0755 %{SOURCE3} ${RPM_BUILD_ROOT}%{_sbindir}/
+install -pm 0755 %{SOURCE5} ${RPM_BUILD_ROOT}%{_sbindir}/
 install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 
 
@@ -66,10 +68,15 @@ install -pm 0755 %{name} ${RPM_BUILD_ROOT}%{_sbindir}/
 %{_bindir}/%{name}
 
 %{_sbindir}/%{name}-helper
+%{_sbindir}/fedora-arm-creator
 %{_sbindir}/%{name}
 
 
 %changelog
+* Sat Jun 22 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.1.1-9
+- Attached a new script source file aimed to make installation of ARM device
+  images easier
+
 * Fri Jun 07 2013 Jon Chiappetta <jonc_mailbox@yahoo.ca> - 1.1.1-8
 - Changed the tempfile module dir location to var
 
