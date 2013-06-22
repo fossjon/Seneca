@@ -1,0 +1,604 @@
+#!/usr/bin/python
+
+import os
+import random
+import re
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib2
+
+import getopt
+import gettext
+import curses
+
+uboot_list = {
+					"beagle":["uboot-beagle", [["uEnv.txt.beagle", "uEnv.txt"]]],
+					"xm":["uboot-beagle", [["uEnv.txt.beagle_xm", "uEnv.txt"]]],
+					"bone":["uboot-beaglebone", [["uEnv.txt.beaglebone", "uEnv.txt"]]],
+					"panda":["uboot-panda", [["uEnv.txt.panda", "uEnv.txt"]]],
+					"a4":["uboot-panda", [["uEnv.txt.panda_a4", "uEnv.txt"]]],
+					"es":["uboot-panda", [["uEnv.txt.panda_es", "uEnv.txt"]]],
+					"uevm":["uboot-uevm", [["uEnv.txt.uevm", "uEnv.txt"]]]
+			}
+
+def float_div(a, b):
+	c = ((float(a)) / (float(b)))
+	c = ((float(c)) * (float(100)))
+	c = (int(c))
+	c = ((float(c)) / (float(100)))
+	return c
+
+def kill_proc(proc_obj):
+	try:
+		os.kill(proc_obj.pid, signal.SIGKILL)
+	except:
+		pass
+
+def form_text(input_text):
+	return ("%s%s%s" % (" " * 2, input_text, " " * 2))
+
+def fill_text(max_wide, input_text, fill_char):
+	diff_len = (max_wide - len(input_text))
+	odd_len = (diff_len % 2)
+	half_len = (diff_len / 2)
+	three_len = (half_len + odd_len)
+	return ("%s%s%s" % (fill_char * half_len, input_text, fill_char * three_len))
+
+def form_size(byte_num):
+	byte_index = 0
+	byte_list = ["", "K", "M", "G", "T"]
+	while (byte_num > 1000):
+		byte_num = float_div(byte_num, 1000)
+		byte_index += 1
+	return [byte_num, byte_list[byte_index]]
+
+def adjust_text(scr_obj, max_wide, max_high, where_mode, disp_mode, box_mode, text_item):
+	if (where_mode == "l"):
+		where_mode = 2
+	elif (where_mode == "ll"):
+		where_mode = 4
+	elif (where_mode == "lll"):
+		where_mode = 8
+	elif (where_mode == "c"):
+		where_mode = ((max_wide - len(text_item)) / 2)
+	elif (where_mode == "r"):
+		where_mode = ((max_wide - len(text_item)) - 2)
+	scr_obj.addstr(max_high, where_mode, text_item, disp_mode)
+	if (box_mode == 1):
+		scr_obj.addstr(max_high, where_mode - 1, " ", curses.A_REVERSE)
+		scr_obj.addstr(max_high, where_mode + len(text_item), " ", curses.A_REVERSE)
+
+def word_wrap(input_text, max_len):
+	wrap_list = []
+	while (len(input_text) > max_len):
+		x = max_len
+		while ((x > -1) and (input_text[x] != " ")):
+			x -= 1
+		if (x < 1):
+			x = max_len
+		wrap_list.append(input_text[:x])
+		input_text = input_text[x:]
+		x = 0
+	if (len(input_text) > 0):
+		wrap_list.append(input_text)
+	return wrap_list
+
+def find_swith(input_list, list_item):
+	item_index = 0
+	x = 0
+	for input_item in input_list:
+		if (input_item.lower().startswith(list_item.lower())):
+			return x
+		x += 1
+	return item_index
+
+def umount_dev(src_device, flat_file):
+	null_out = subprocess.check_call(["/usr/bin/sync"], shell=False)
+	m = ""
+	if (re.match("^.*/mmc.*$", src_device, re.I)):
+		m = "p"
+	for x in range(0, 10):
+		print("make-card\tUnmounting [%s%s%d]...\t0" % (src_device, m, x)); sys.stdout.flush()
+		try:
+			null_out = subprocess.check_output(["/usr/bin/umount", "%s%s%d" % (src_device, m, x)], shell=False, stderr=subprocess.STDOUT)
+		except:
+			pass
+	if (flat_file):
+		print("make-card\tUnmounting [%s]...\t0" % (flat_file)); sys.stdout.flush()
+		null_out = subprocess.check_output(["/usr/sbin/kpartx", "-dv", flat_file], shell=False, stderr=subprocess.STDOUT)
+
+def mount_dirs(src_device, dir_list):
+	p = 1
+	m = ""
+	if (re.match("^.*/mmc.*$", src_device, re.I)):
+		m = "p"
+	for dir_item in dir_list:
+		if (dir_item[1] == 1):
+			print("make-card\tMounting [%s%s%d] to [%s]...\t0" % (src_device, m, p, dir_item[0])); sys.stdout.flush()
+			for x in range(0, 5):
+				if (os.path.exists("%s%s%d" % (src_device, m, p))):
+					break
+				time.sleep(1)
+			try:
+				os.makedirs(dir_item[0])
+			except:
+				pass
+			mount_flag = 0
+			for x in range(0, 3):
+				if (mount_flag != 0):
+					break
+				try:
+					std_out = subprocess.check_output(["/usr/bin/mount", "%s%s%d" % (src_device, m, p), dir_item[0]], shell=False, stderr=subprocess.STDOUT)
+					mount_flag = 1
+				except:
+					time.sleep(1)
+			if (mount_flag == 0):
+				print("make-card\tError mounting [%s%s%d] to [%s]!\t0" % (src_device, m, p, dir_item[0])); sys.stdout.flush()
+				return 1
+		p += 1
+	return 0
+
+def make_card(src_file, device_type, target_device):
+	global uboot_list
+	
+	last_time = 0
+	wait_time = 0.30
+	block_size = (2 ** 23)
+	
+	umount_dev(target_device, "")
+	
+	# Download the specified file
+	if (re.match("^[a-z]+://.*$", src_file)):
+		url_obj = urllib2.urlopen(src_file)
+		meta_list = url_obj.info().getheaders("Content-Length")
+		url_size = int(meta_list[0])
+		file_size = 0; beg_time = time.time()
+		file_name = os.path.basename(src_file)
+		file_obj = open(file_name, "wb")
+		while (1):
+			pres_time = time.time()
+			if ((pres_time - last_time) >= wait_time):
+				byte_info = form_size(float_div(file_size, (pres_time - beg_time)))
+				print("make-card\tDownloading [%s]... [%s %%] [%s %sB/s]\t0" % (file_name, float_div(file_size, url_size) * 100, byte_info[0], byte_info[1])); sys.stdout.flush()
+				last_time = pres_time
+			file_data = url_obj.read(block_size)
+			if (not file_data):
+				break
+			file_size += len(file_data)
+			file_obj.write(file_data)
+		file_obj.close()
+		src_file = file_name
+	
+	# Extract and write the file to the specified device
+	read_prog = "/usr/bin/cat"
+	if (re.match("^.*\.xz$", src_file)):
+		read_prog = "/usr/bin/xzcat"
+	sub_proc = subprocess.Popen([read_prog, src_file], shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	file_size = 0; beg_time = time.time()
+	file_obj = open(target_device, "wb")
+	while (1):
+		pres_time = time.time()
+		if ((pres_time - last_time) >= wait_time):
+			total_info = form_size(file_size)
+			byte_info = form_size(float_div(file_size, (pres_time - beg_time)))
+			print("make-card\tInstalling [%s] to [%s]... [%s %sB] [%s %sB/s]\t0" % (src_file, target_device, total_info[0], total_info[1], byte_info[0], byte_info[1])); sys.stdout.flush()
+			last_time = pres_time
+		file_data = sub_proc.stdout.read(block_size)
+		if (not file_data):
+			break
+		file_size += len(file_data)
+		file_obj.write(file_data)
+		file_obj.flush()
+		os.fsync(file_obj.fileno())
+	file_obj.close()
+	
+	null_out = subprocess.check_output(["/usr/sbin/partprobe"], shell=False, stderr=subprocess.STDOUT)
+	
+	# Mount and copy the needed files between the partitions
+	mount_list = [["/mnt/arm_boot", 1], ["/mnt/arm_swap", 0], ["/mnt/arm_root", 1]]
+	uboot_pref = "/usr/share"
+	pref_list = [["MLO", "MLO"]]
+	block_list = ["^mlo$", "^uenv.txt.*$"]
+	
+	if (device_type in uboot_list.keys()):
+		# Process flat device files
+		local_file = ""
+		if (not re.match("^/dev/.*$", target_device)):
+			local_file = target_device
+			std_out = subprocess.check_output(["/usr/sbin/kpartx", "-av", target_device], shell=False, stderr=subprocess.STDOUT)
+			std_list = std_out.split("\n")
+			for std_item in std_list:
+				loop_match = re.match("^.*(loop[0-9]+).*$", std_item.strip())
+				if (loop_match):
+					target_device = ("/dev/mapper/%sp" % (loop_match.group(1).strip()))
+					break
+		
+		# First copy round
+		if (mount_dirs(target_device, mount_list) != 0):
+			umount_dev(target_device, local_file)
+			return 1
+		
+		for pref_item in pref_list:
+			src_file = ("%s/%s/%s/%s" % (mount_list[2][0], uboot_pref, uboot_list[device_type][0], pref_item[0]))
+			dst_file = ("%s/%s" % (mount_list[0][0], pref_item[1]))
+			print("make-card\tCopying [%s] to [%s]...\t0" % (src_file, dst_file)); sys.stdout.flush()
+			try:
+				shutil.copyfile(src_file, dst_file)
+			except:
+				print("make-card\tError copying [%s] to [%s]!\t0" % (src_file, dst_file)); sys.stdout.flush()
+				return 1
+		
+		umount_dev(target_device, "")
+		
+		# Second copy round
+		if (mount_dirs(target_device, mount_list) != 0):
+			time.sleep(600);umount_dev(target_device, local_file)
+			return 1
+		
+		for uboot_item in uboot_list[device_type][1]:
+			src_file = ("%s/%s/%s/%s" % (mount_list[2][0], uboot_pref, uboot_list[device_type][0], uboot_item[0]))
+			dst_file = ("%s/%s" % (mount_list[0][0], uboot_item[1]))
+			print("make-card\tCopying [%s] to [%s]...\t0" % (src_file, dst_file)); sys.stdout.flush()
+			try:
+				shutil.copyfile(src_file, dst_file)
+			except:
+				print("make-card\tError copying [%s] to [%s]!\t0" % (src_file, dst_file)); sys.stdout.flush()
+				return 1
+		
+		umount_dev(target_device, "")
+		
+		# Third copy round
+		if (mount_dirs(target_device, mount_list) != 0):
+			umount_dev(target_device, local_file)
+			return 1
+		
+		dir_path = ("%s/%s/%s" % (mount_list[2][0], uboot_pref, uboot_list[device_type][0]))
+		for file_item in os.listdir(dir_path):
+			block_flag = 0
+			for block_item in block_list:
+				if (re.match(block_item, file_item, re.I)):
+					block_flag = 1
+			if (block_flag == 0):
+				src_file = ("%s/%s" % (dir_path, file_item))
+				dst_file = ("%s/%s" % (mount_list[0][0], file_item))
+				print("make-card\tCopying [%s] to [%s]...\t0" % (src_file, dst_file)); sys.stdout.flush()
+				try:
+					shutil.copyfile(src_file, dst_file)
+				except:
+					print("make-card\tError copying [%s] to [%s]!\t0" % (src_file, dst_file)); sys.stdout.flush()
+					return 1
+		
+		umount_dev(target_device, "")
+	
+	umount_dev(target_device, local_file)
+	print("make-card\tInstall completed successfully! Press Q to quit now.\t0"); sys.stdout.flush()
+	return 0
+
+def list_disks():
+	drive_list = [[], []]
+	block_list = ["/mapper/[^ :]+", "/md[0-9]*"]
+	sub_proc = subprocess.Popen(["/usr/sbin/fdisk", "-l"], shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	for line_read in sub_proc.stdout.readlines():
+		block_flag = 0
+		for block_item in block_list:
+			if (re.match("^Disk[ ]*(/[^ :]+%s)[ :]*.*$" % (block_item), line_read.strip())):
+				block_flag = 1
+		if (block_flag == 0):
+			regx_list = re.match("^Disk[ ]*(/[^ :]+)[ :]*([^ ,]+)[ ,]*([^ ,]+).*$", line_read.strip())
+			if (regx_list):
+				drive_list[0].append("%s (%s %s)" % (regx_list.group(1), regx_list.group(2), regx_list.group(3)))
+				drive_list[1].append(regx_list.group(1))
+	tmp_file = "/var/tmp/Fedora-ARM.tmp.img"
+	drive_list[0].append("%s (Local File)" % (tmp_file))
+	drive_list[1].append(tmp_file)
+	for x in range(0, len(drive_list[0])):
+		print("list-disks"+"\t"+drive_list[0][x]+"\t"+drive_list[1][x])
+	return drive_list
+
+def list_arms():
+	arm_list = [[], []]
+	arm_list[0] = ["(None)", "Beagle", "Beagle-XM", "Beagle-Bone", "Panda", "Panda-A4", "Panda-ES", "UEVM"]
+	arm_list[1] = ["none", "beagle", "xm", "bone", "panda", "a4", "es", "uevm"]
+	for x in range(0, len(arm_list[0])):
+		print("list-arms"+"\t"+arm_list[0][x]+"\t"+arm_list[1][x])
+	return arm_list
+
+def list_downloads():
+	url_list = [[], []]
+	return url_list
+	main_url = "http://armpkgs.fedoraproject.org/mash/stage"
+	url_obj = urllib2.urlopen("%s/?C=M;O=D" % (main_url))
+	url_data = url_obj.read().replace("\0","").replace("\t","").replace("\r","").replace("\n","")
+	line_list = url_data.split("<img")
+	regx_list = None
+	for line_read in line_list:
+		if (len(url_list[0]) > 0):
+			break
+		regx_list = re.match("^.*src=[^>]*folder.gif.*<a [^>]*href=['\"]([^'\"]+)['\"].*$", line_read.strip())
+		if (regx_list):
+			sub_url = regx_list.group(1)
+			url_obj = urllib2.urlopen("%s/%s/Images/armhfp/" % (main_url, sub_url))
+			url_data = url_obj.read().replace("\0","").replace("\t","").replace("\r","").replace("\n","")
+			line_list = url_data.split("<img")
+			regx_list = None
+			for line_read in line_list:
+				regx_list = re.match("^.*src=[^>]*.gif.*<a [^>]*href=['\"]([^'\"]+\.xz)['\"].*$", line_read.strip())
+				if (regx_list):
+					url_list[0].append("%s (Remote)" % (regx_list.group(1)))
+					url_list[1].append("%s/%s/Images/armhfp/%s" % (main_url, sub_url, regx_list.group(1)))
+	for x in range(0, len(url_list[0])):
+		print("list-downloads"+"\t"+url_list[0][x]+"\t"+url_list[1][x])
+	return url_list
+
+def main(std_scr):
+	# Define the main menu selection variables
+	anim_index = [0, 0, 0]
+	anim_list = [["!", " ", "@", " ", "#", " ", "*", " "], [" Loading "], [".....", "|....", ".|...", "..|..", "...|.", "....|"]]
+	head_list = ["Fedora ARM Image Installation & Customization", "Page %d / %d"]
+	main_index = 0
+	menu_list = [	[0, ["Welcome!", "* ", "* "], ["This script will help with installing and configuring specific versions of Fedora on ARM", "It will prompt you to select a Fedora Image, Device Type, & Disk Device", "Any needed files will be saved in your current directory [%s]" % (os.getcwd()), "Be careful and double check your selections before continuing", "Make a backup of any devices that you select with this script"], [], None, 0],
+					[0, ["Select an image of Fedora Linux:", "[ ] ", "[*] "], [], [], "list-downloads", 0],
+					[0, ["Select an ARM device type:", "[ ] ", "[*] "], [], [], "list-arms", 0],
+					[0, ["Select a target install disk:", "[ ] ", "[*] "], [], [], "list-disks", 0],
+					[0, ["Final confirmation of your selections:", "", ""], ["Image Name", "ARM Device", "Target Disk"], [""], None, 0]
+				]
+	trail_list = ["<- (Left Key) Back", "(r) Refresh, (q) Quit", "Forward (Enter) ->"]
+	warn_list = (["WARNING!", ""] + word_wrap("Advancing to the next step will destroy all of the data on the selected device! Make sure to backup any important information on the device selected before continuing! Please double check that the selections you made above are correct!", 80) + ["", "WARNING!"])
+	skip_list = []
+	
+	# Calculate max column lengths
+	max_len = 0; menu_len = (len(menu_list) - 1)
+	for x in range(0, len(menu_list[menu_len][2])):
+		max_len = max(len(menu_list[menu_len][2][x]), max_len)
+	for x in range(0, len(menu_list[menu_len][2])):
+		diff_len = (max_len - len(menu_list[menu_len][2][x]))
+		menu_list[menu_len][2][x] = ("%s%s : " % (menu_list[menu_len][2][x], " " * diff_len))
+	
+	max_len = 0
+	for x in range(1, len(warn_list) - 1):
+		max_len = max(len(warn_list[x]), max_len)
+	max_len += 2
+	for x in range(0, len(warn_list)):
+		warn_list[x] = fill_text(max_len, warn_list[x], " ")
+	
+	(opts, args) = getopt.getopt(sys.argv[1:], "", ["image=", "board=", "disk="])
+	
+	# Initialize the main curses screen variables
+	curses.curs_set(0)
+	(last_high, last_wide) = (0, 0)
+	std_scr.clear()
+	sub_win = std_scr.subwin(0, 0)
+	sub_win.keypad(True)
+	sub_win.timeout(0)
+	state_flag = 0; update_flag = 0; locked_flag = 0
+	sub_proc = None; sub_time = 0; sub_data = ""
+	
+	while (1):
+		(SCR_HIGH, SCR_WIDE) = std_scr.getmaxyx()
+		if ((SCR_HIGH != last_high) or (SCR_WIDE != last_wide)):
+			update_flag = 1
+		(last_high, last_wide) = (SCR_HIGH, SCR_WIDE)
+		pres_time = time.time()
+		while (main_index in skip_list):
+			main_index = min(main_index + 1, len(menu_list) - 1)
+		
+		if (update_flag == 1):
+			for x in range(0, SCR_HIGH):
+				item_mode = curses.A_NORMAL
+				if ((x == 0) or (x == (SCR_HIGH - 1))):
+					item_mode = curses.A_REVERSE
+				adjust_text(sub_win, SCR_WIDE, x, 1, item_mode, 1, " " * (SCR_WIDE - 3))
+			
+			# Draw the main menu header
+			adjust_text(sub_win, SCR_WIDE, 0, "c", curses.A_REVERSE, 0, head_list[0])
+			if (locked_flag == 0):
+				adjust_text(sub_win, SCR_WIDE, 0, "r", curses.A_REVERSE, 0, form_text(head_list[1] % (main_index + 1, len(menu_list))))
+			adjust_text(sub_win, SCR_WIDE, 2, "ll", curses.A_NORMAL, 0, menu_list[main_index][1][0])
+			
+			# Update the data for the main menu body [ASYNC]
+			if (menu_list[main_index][4] and (menu_list[main_index][5] == 0)):
+				sub_proc = subprocess.Popen(["/usr/bin/python", sys.argv[0], "--%s" % (menu_list[main_index][4])], shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+				menu_list[main_index][0] = 0
+				menu_list[main_index][5] = 1
+			
+			# Draw the main menu body
+			if (main_index < (len(menu_list) - 1)):
+				state_flag = 0
+				loop_index = 0
+				menu_list[main_index][0] = max(menu_list[main_index][0], 0)
+				for menu_item in menu_list[main_index][2]:
+					item_sel = menu_list[main_index][1][1]; item_mode = curses.A_NORMAL
+					if (loop_index == menu_list[main_index][0]):
+						item_sel = menu_list[main_index][1][2]; item_mode = curses.A_NORMAL
+					adjust_text(sub_win, SCR_WIDE, loop_index + 4, "lll", item_mode, 0, "%s%s" % (item_sel, menu_item))
+					loop_index += 1
+				if (len(menu_list[main_index][2]) < 1):
+					adjust_text(sub_win, SCR_WIDE, loop_index + 4, "lll", curses.A_NORMAL, 0, "(No menu items could be found or listed)")
+					loop_index += 1
+			
+			# Draw the final confirmation screen
+			elif (state_flag < 3):
+				if (state_flag < 2):
+					state_flag = 1
+				loop_index = 1;# Note: This value is index dependent on (menu_list)
+				for menu_item in menu_list[main_index][2]:
+					menu_index = menu_list[loop_index][0]
+					if (menu_index >= len(menu_list[loop_index][2])):
+						str_item = ("(Page %d) (Invalid selection - Please go back and fix this option)" % (loop_index + 1))
+						state_flag = 0
+					else:
+						str_item = ("(Page %d) %s%s" % (loop_index + 1, menu_item, menu_list[loop_index][2][menu_index]))
+					adjust_text(sub_win, SCR_WIDE, loop_index + 4, "lll", curses.A_NORMAL, 0, str_item)
+					loop_index += 1
+				# Draw a final warning message
+				if ((state_flag == 1) and (locked_flag == 0)):
+					loop_index = ((SCR_HIGH - 2) / 2)
+					for warn_item in warn_list:
+						item_mode = curses.A_NORMAL
+						if (warn_item.strip().lower().startswith("warning")):
+							item_mode = curses.A_REVERSE
+						adjust_text(sub_win, SCR_WIDE, loop_index, "c", item_mode, 1, warn_item)
+						loop_index += 1
+			
+			# Draw the main menu footer
+			if (locked_flag == 0):
+				adjust_text(sub_win, SCR_WIDE, SCR_HIGH - 1, "l", curses.A_REVERSE, 0, form_text(trail_list[0]))
+			adjust_text(sub_win, SCR_WIDE, SCR_HIGH - 1, "c", curses.A_REVERSE, 0, form_text(trail_list[1]))
+			if (locked_flag == 0):
+				adjust_text(sub_win, SCR_WIDE, SCR_HIGH - 1, "r", curses.A_REVERSE, 0, form_text(trail_list[2]))
+			
+			sub_win.refresh()
+		
+		update_flag = 0
+		
+		if ((pres_time - sub_time) > 0.20):
+			# Draw the loading text if a sub process is running
+			if (sub_proc):
+				anim_str = ""
+				for x in range(0, len(anim_list)):
+					list_index = anim_index[x]
+					anim_str += anim_list[x][list_index]
+					anim_index[x] = ((anim_index[x] + 1) % len(anim_list[x]))
+				adjust_text(sub_win, SCR_WIDE, 0, "l", curses.A_REVERSE, 0, form_text(anim_str))
+			
+			# Draw the final progress screen
+			if ((0 < state_flag) and (state_flag < 3) and (locked_flag == 1)):
+				loop_index = ((SCR_HIGH - 2) / 2)
+				half_wide = ((SCR_WIDE * 8) / 10)
+				adjust_text(sub_win, SCR_WIDE, loop_index, "c", curses.A_REVERSE, 1, fill_text(half_wide, "Install Progress", " "))
+				adjust_text(sub_win, SCR_WIDE, loop_index + 1, "c", curses.A_NORMAL, 1, fill_text(half_wide, "", " "))
+				adjust_text(sub_win, SCR_WIDE, loop_index + 2, "c", curses.A_NORMAL, 1, fill_text(half_wide, menu_list[main_index][3][0], " "))
+				adjust_text(sub_win, SCR_WIDE, loop_index + 3, "c", curses.A_NORMAL, 1, fill_text(half_wide, "", " "))
+				adjust_text(sub_win, SCR_WIDE, loop_index + 4, "c", curses.A_REVERSE, 1, fill_text(half_wide, "", " "))
+				if ((state_flag == 1) and (not sub_proc)):
+					state_flag = 2
+					update_flag = 1
+			
+			sub_win.refresh()
+			sub_time = pres_time
+		
+		# Process any async communication data
+		if (sub_proc):
+			(r_list, w_list, x_list) = select.select([sub_proc.stdout], [], [], 0)
+			if (len(r_list) > 0):
+				tmp_data = sub_proc.stdout.readline()
+				if (not tmp_data):
+					if (main_index < (len(menu_list) - 1)):
+						menu_list[main_index][2] = []
+						menu_list[main_index][3] = []
+						# Append any returned sub process results
+						for sub_line in sub_data.split("\n"):
+							sub_list = sub_line.split("\t")
+							if (len(sub_list) == 3):
+								menu_list[main_index][2].append(sub_list[1])
+								menu_list[main_index][3].append(sub_list[2])
+						# Append any command line arguments here
+						for opti in opts:
+							if ((main_index == 1) and (opti[0] == "--image")):
+								# Note: This value is index dependent on (menu_list)
+								menu_list[main_index][2].append("%s (Local)" % (os.path.basename(opti[1])))
+								menu_list[main_index][3].append(opti[1])
+								menu_list[main_index][0] = find_swith(menu_list[main_index][2], opti[1])
+							if ((main_index == 2) and (opti[0] == "--board")):
+								# Note: This value is index dependent on (menu_list)
+								menu_list[main_index][0] = find_swith(menu_list[main_index][2], opti[1])
+							if ((main_index == 3) and (opti[0] == "--disk")):
+								# Note: This value is index dependent on (menu_list)
+								menu_list[main_index][0] = find_swith(menu_list[main_index][2], opti[1])
+						update_flag = 1
+					kill_proc(sub_proc); sub_proc = None; sub_time = 0; sub_data = ""
+				else:
+					sub_data += tmp_data
+					if ((0 < state_flag) and (locked_flag == 1)):
+						sub_list = tmp_data.split("\t")
+						if (len(sub_list) == 3):
+							menu_list[main_index][3][0] = sub_list[1]
+						sub_data = ""
+		
+		# Process any user input key presses
+		input_key = sub_win.getch()
+		
+		if (input_key in [27, ord("q")]):
+			kill_proc(sub_proc); sub_proc = None; sub_time = 0; sub_data = ""
+			sys.exit(0)
+		
+		if (locked_flag == 0):
+			if (input_key in [curses.KEY_LEFT]):
+				main_index = max(main_index - 1, 0)
+				while ((main_index in skip_list) and (main_index > 0)):
+					main_index = max(main_index - 1, 0)
+				update_flag = 1
+				kill_proc(sub_proc); sub_proc = None; sub_time = 0; sub_data = ""
+			elif (input_key in [curses.KEY_ENTER, ord("\n")]):
+				main_index = min(main_index + 1, len(menu_list) - 1)
+				update_flag = 1
+				kill_proc(sub_proc); sub_proc = None; sub_time = 0; sub_data = ""
+				# Perform the final requested actions and exit [ASYNC]
+				if (state_flag == 1):
+					src_index = menu_list[1][0]; type_index = menu_list[2][0]; target_index = menu_list[3][0];# Note: This value is index dependent on (menu_list)
+					src_name = menu_list[1][3][src_index]; type_name = menu_list[2][3][type_index]; target_name = menu_list[3][3][target_index];# Note: This value is index dependent on (menu_list)
+					sub_proc = subprocess.Popen(["/usr/bin/python", sys.argv[0], "--make-card", "--image=%s" % (src_name), "--board=%s" % (type_name), "--disk=%s" % (target_name)], shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+					locked_flag = 1
+			elif (input_key in [curses.KEY_UP]):
+				menu_list[main_index][0] = max(menu_list[main_index][0] - 1, 0)
+				update_flag = 1
+			elif (input_key in [curses.KEY_DOWN]):
+				menu_list[main_index][0] = min(menu_list[main_index][0] + 1, len(menu_list[main_index][2]) - 1)
+				update_flag = 1
+			elif (input_key in [ord("r")]):
+				menu_list[main_index][5] = 0
+				update_flag = 1
+				kill_proc(sub_proc); sub_proc = None; sub_time = 0; sub_data = ""
+		
+		time.sleep(0.01)
+
+if (__name__ == "__main__"):
+	image_file = ""; board_type = "none"; disk_device = ""
+	
+	if (os.getuid() != 0):
+		print("Please re-run this script as the root user!")
+		sys.exit(0)
+	
+	try:
+		(opts, args) = getopt.getopt(sys.argv[1:], "h", ["help", "list-downloads", "list-arms", "list-disks", "make-card", "install", "image=", "board=", "disk="])
+	except:
+		opts = [["-h",""]]
+	
+	for opti in opts:
+		if ((opti[0] == "-h") or (opti[0] == "--help")):
+			print("Usage: %s [-h --help] --install --image=/path/to/Fedora-ARM.img.xz [--board=<type>] --disk=/dev/..." % (sys.argv[0]))
+			sys.exit(0)
+		if (opti[0] == "--list-downloads"):
+			list_downloads()
+			sys.exit(0)
+		if (opti[0] == "--list-arms"):
+			list_arms()
+			sys.exit(0)
+		if (opti[0] == "--list-disks"):
+			list_disks()
+			sys.exit(0)
+		if (opti[0] == "--image"):
+			image_file = opti[1]
+		if (opti[0] == "--board"):
+			board_type = opti[1]
+		if (opti[0] == "--disk"):
+			disk_device = opti[1]
+	
+	for opti in opts:
+		if ((opti[0] == "--make-card") or (opti[0] == "--install")):
+			if ((not image_file) or (not disk_device)):
+				print("You must provide a correct image file and disk drive before installing!")
+				sys.exit(0)
+			make_card(image_file, board_type, disk_device)
+			sys.exit(0)
+	
+	curses.wrapper(main)
+	'''try:
+		curses.wrapper(main)
+	except:
+		curses.endwin()'''
+
