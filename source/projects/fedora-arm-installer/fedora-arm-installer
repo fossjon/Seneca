@@ -84,7 +84,7 @@ class linux:
 		return ""
 	
 	def callself(self, progcomd, argslist):
-		proglist = ["/usr/bin/python"]
+		proglist = [sys.executable]
 		
 		if (progcomd[0:1] != "/"):
 			progcomd = (os.getcwd() + "/" + progcomd)
