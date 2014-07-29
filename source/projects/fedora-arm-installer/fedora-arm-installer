@@ -14,7 +14,7 @@
 
 versnumb = "8"
 infotext = '''
-Date: 08/06/2013 (dd/mm/yyyy)
+Date: 2013-06-08
 Version: 1.1.1-''' + versnumb + '''
 Author: Jon Chiappetta (jonc_mailbox@yahoo.ca)
 '''
